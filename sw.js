@@ -1,6 +1,6 @@
 // Out & About offline support: keeps the app and the latest lists on the phone.
-var CACHE = "out-and-about-v2";
-var SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "data/cafes.csv", "data/food.csv", "data/bars.csv", "data/branches.csv", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
+var CACHE = "out-and-about-v3";
+var SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "data/cafes.csv", "data/food.csv", "data/bars.csv", "data/branches.csv", "data/desserts.csv", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
