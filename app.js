@@ -821,8 +821,11 @@
       (x.o ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">' + (x.type === "food" ? "🥢" : x.type === "bar" ? "🍸" : x.type === "dessert" ? "🍰" : "☕") + "</span><span><b>" + (x.type === "food" ? "Order this" : x.type === "bar" ? "Drink this" : "Get this") + "</b><small>" + esc(x.o) + "</small></span></div>" : "") +
       (x.dessert ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">🍰</span><span><b>Stay for dessert</b><small>' + esc(x.dessert) + "</small></span></div>" : "") +
       (x.no ? '<p class="note" style="font-size:16px">“' + esc(x.no) + "”</p>" : "") + tagChips(x) +
-      '<div class="chips">' + addBtn(x) + '<a class="pill" href="' + esc(mapsUrl(x)) + '" target="_blank" rel="noopener">📍 Maps</a><button class="pill" data-share="1">Share</button></div>' +
-      bookCard(x) + voteBlock(x) + branchHtml +
+      bookLine(x) +
+      '<div class="chips">' + (isWalkIn(x) ? "" : '<button class="pill solid" data-book="' + esc(x.key) + '">📅 Book</button>') + addBtn(x).replace(" solid", "") + '<a class="pill" href="' + esc(mapsUrl(x)) + '" target="_blank" rel="noopener">📍 Maps</a><button class="pill" data-share="1">Share</button></div>' +
+      (bookingOf(x).note && !isWalkIn(x) ? '<p class="meta" style="margin:-6px 0 0">ℹ️ ' + esc(bookingOf(x).note) + "</p>" : "") +
+      (isWalkIn(x) ? "" : '<button class="small-link" style="margin-top:-6px" data-bookedit="' + esc(x.key) + '">Booked some other way? Add it</button>') +
+      voteBlock(x) + branchHtml +
       sections.filter(function (s) { return s[1].length; }).map(function (s) { return '<span class="label">' + s[0] + "</span>" + pairList(s[1]); }).join("") +
       '<button class="small-link" data-closed="' + esc(x.key) + '">Has this ' + word + " closed? Let Putri know</button></div>";
   };
@@ -858,6 +861,12 @@
   }
   // Bookings are a list, so the same place can be booked on several dates.
   function saveBookings() { save("oa-bookings", S.bookings); }
+  function addBooking(key, w, via) {
+    var b = { id: "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), key: key, date: w.date, time: w.time, party: w.party, ref: "", deposit: false, amount: "", notes: "", via: via || "" };
+    S.bookings.push(b); saveBookings();
+    if (w.date === S.dayDate) { S.plan[key] = S.plan[key] || {}; S.plan[key].time = w.time; savePlan(); if (!inDay(key) && S.myday.length < 8) { S.myday.push(key); saveDay(); } }
+    return b;
+  }
   function byWhen(a, b) { var A = (a.date || "") + (a.time || ""), B = (b.date || "") + (b.time || ""); return A < B ? -1 : A > B ? 1 : 0; }
   function bookingById(id) { return S.bookings.filter(function (b) { return b.id === id; })[0]; }
   function bookingOn(key, date) { return S.bookings.filter(function (b) { return b.key === key && b.date === date; }).sort(byWhen)[0]; }
@@ -878,6 +887,11 @@
   }
   function draftFor(x) { return { date: S.dayDate, time: suggestTime(x), party: S.party }; }
 
+  function bookLine(x) {
+    var ups = upcomingFor(x.key);
+    if (ups.length) return '<a class="booked-line" href="#bookings">✅ Booked ' + esc(fmtDate(ups[0].date) + (ups[0].time ? ", " + fmtTime(ups[0].time) : "")) + (ups.length > 1 ? " (+" + (ups.length - 1) + " more)" : "") + " ›</a>";
+    return isWalkIn(x) ? '<p class="booked-line walk">🚶 Walk-in, usually. No booking needed.</p>' : "";
+  }
   function bookCard(x) {
     var k = bookingOf(x), ups = upcomingFor(x.key);
     var mine = ups.length ? '<div class="book-card booked"><b>✅ You’re booked' + (ups.length > 1 ? " (" + ups.length + " dates)" : "") + "</b>" + ups.map(function (b) {
@@ -914,13 +928,21 @@
     return { date: d ? d.value : S.dayDate, time: t ? t.value : "", party: p ? +p.textContent : S.party };
   }
   SHEETS.book = function (x, m) {
-    var b = m.extra.b || draftFor(x), opts = bookOptions(x, b), k = bookingOf(x), wa = opts.filter(function (o) { return o.id === "wa"; })[0];
-    return '<span class="label" style="margin:0">' + icon(x) + " " + esc(x.d) + '</span><h2 id="sheet-title" class="app-title" style="font-size:24px">Book ' + esc(x.n) + "</h2>" +
-      whenFields(b) +
-      (k.note ? '<p class="banner" style="margin:0"><span aria-hidden="true">ℹ️</span><span><small>' + esc(k.note) + "</small></span></p>" : "") +
-      '<div class="book-opts">' + opts.map(function (o, i) { return '<button class="book-opt' + (i ? "" : " primary") + '" data-bookvia="' + o.id + '"><span class="bo-ico" aria-hidden="true">' + o.icon + "</span><span><b>" + esc(o.label) + "</b><small>" + esc(o.sub) + "</small></span><span aria-hidden=\"true\">↗</span></button>"; }).join("") + "</div>" +
-      (wa ? '<span class="label">Your WhatsApp message</span><div class="wa-bubble" id="wa-preview">' + esc(waMessage(b)) + "</div>" : "") +
-      '<p class="meta" style="margin:0">Deposits and any extra details are filled in on their side. Come back here afterwards to save your booking in My day.</p>';
+    var b = m.extra.b || draftFor(x), k = bookingOf(x);
+    if ((m.extra.step || 1) === 1) {
+      return '<span class="label" style="margin:0">' + icon(x) + " " + esc(x.d) + ' · step 1 of 2</span><h2 id="sheet-title" class="app-title" style="font-size:24px">Book ' + esc(x.n) + "</h2>" +
+        '<p class="sub" style="margin:0">When, and how many of you?</p>' + whenFields(b) +
+        '<button class="cta cta-main" data-booknext="1">Next →</button>';
+    }
+    var opts = bookOptions(x, b), first = opts[0], rest = opts.slice(1);
+    function optBtn(o, primary) { return '<button class="book-opt' + (primary ? " primary" : "") + '" data-bookvia="' + o.id + '"><span class="bo-ico" aria-hidden="true">' + o.icon + "</span><span><b>" + esc(o.label) + "</b><small>" + esc(o.sub) + '</small></span><span aria-hidden="true">↗</span></button>'; }
+    return '<span class="label" style="margin:0">' + icon(x) + " " + esc(x.d) + ' · step 2 of 2</span><h2 id="sheet-title" class="app-title" style="font-size:24px">Book ' + esc(x.n) + "</h2>" +
+      '<button class="when-summary" data-bookback="1">' + esc(fmtDate(b.date) + " · " + fmtTime(b.time) + " · " + b.party + (b.party == 1 ? " person" : " people")) + " <span>Change</span></button>" +
+      optBtn(first, true) +
+      (first.id === "wa" ? '<details class="more"><summary>See message</summary><div class="wa-bubble">' + esc(waMessage(b)) + "</div></details>" : "") +
+      (rest.length ? '<details class="more"><summary>Other ways to book</summary><div class="book-opts">' + rest.map(function (o) { return optBtn(o, false); }).join("") + "</div></details>" : "") +
+      (k.note ? '<p class="meta" style="margin:0">ℹ️ ' + esc(k.note) + "</p>" : "") +
+      '<p class="meta" style="margin:0">Any deposit or extra details are done on their side.</p>';
   };
   SHEETS.demo = function (x, m) {
     var o = m.extra.opt, b = m.extra.b;
@@ -944,30 +966,35 @@
       '<div class="field"><label for="b-notes">Notes <span class="meta">(optional)</span></label><input id="b-notes" maxlength="120" placeholder="e.g. window seat, birthday cake" value="' + esc(p.notes || "") + '"></div>' +
       '<button class="cta cta-main" data-savebooking="1">Save booking</button>' + (p.id ? '<button class="small-link" data-unbook="1">Remove this booking</button>' : "");
   };
+  SHEETS.saved = function (x, m) {
+    var b = bookingById(m.extra.id) || {};
+    return '<span class="label" style="margin:0">' + icon(x) + " " + esc(x.n) + '</span><h2 id="sheet-title" class="app-title" style="font-size:24px">✅ Booked!</h2>' +
+      '<p class="sub" style="margin:0">' + esc(fmtDate(b.date) + " · " + fmtTime(b.time) + " · " + b.party + (b.party == 1 ? " person" : " people")) + ". Saved in Bookings" + (b.date === S.dayDate ? " and My day" : "") + ".</p>" +
+      '<details class="more"><summary>Add details (optional)</summary>' +
+      '<div class="field"><label for="b-ref">Confirmation number</label><input id="b-ref" maxlength="40" autocomplete="off" value="' + esc(b.ref || "") + '"></div>' +
+      '<div class="field"><label class="check"><input type="checkbox" id="b-dep"' + (b.deposit ? " checked" : "") + '> I paid a deposit</label><input id="b-amt" inputmode="numeric" placeholder="Amount in HK$ (optional)" maxlength="8" value="' + esc(b.amount || "") + '"></div>' +
+      '<div class="field"><label for="b-notes">Notes</label><input id="b-notes" maxlength="120" placeholder="e.g. window seat, birthday cake" value="' + esc(b.notes || "") + '"></div></details>' +
+      '<button class="cta cta-main" data-saveddone="1">Done</button>';
+  };
+  // Everything about one stop in My day: time, booking, directions, remove.
+  SHEETS.stop = function (x) {
+    var p = planOf(x.key), bk = bookingOn(x.key, S.dayDate), st = bookStatus(x), i = S.myday.indexOf(x.key), spot = daySpots(S.myday.map(find).filter(Boolean))[i];
+    return '<span class="label" style="margin:0">Stop ' + (i + 1) + " · " + esc(spot && spot.branch ? spot.branch.label + " branch" : x.d) + '</span><h2 id="sheet-title" class="app-title" style="font-size:24px">' + icon(x) + " " + esc(x.n) + "</h2>" +
+      '<div class="field"><label for="stop-time">🕒 Time</label><input id="stop-time" type="time" value="' + esc(p.time || (bk && bk.time) || "") + '"></div>' +
+      '<div class="stop-book">' + (st === "booked" ? "<span>✅ " + esc(bookedLine(bk)) + '</span><button class="pill" data-editbk="' + esc(bk.id) + '">Edit</button>'
+        : st === "walkin" ? "<span>🚶 Walk-in, no booking needed</span>"
+        : '<span>📅 Not booked yet</span><button class="pill solid" data-book="' + esc(x.key) + '">Book</button>') + "</div>" +
+      (st === "tobook" ? '<button class="small-link" data-bookedit="' + esc(x.key) + '">Already booked? Add it</button>' : "") +
+      '<div class="chips"><a class="pill" href="' + href(x) + '">View place</a><a class="pill" href="' + esc(spot && spot.branch ? branchUrl(spot.branch) : mapsUrl(x)) + '" target="_blank" rel="noopener">📍 Directions</a><button class="pill" data-rmkey="' + esc(x.key) + '">Remove</button></div>';
+  };
   SHEETS.time = function (x) {
     return '<span class="label" style="margin:0">' + icon(x) + " " + esc(x.n) + '</span><h2 id="sheet-title" class="app-title" style="font-size:24px">What time?</h2>' +
       '<div class="field"><label for="b-time">Time</label><input id="b-time" type="time" value="' + esc(suggestTime(x)) + '"></div>' +
       '<button class="cta cta-main" data-savetime="1">Save</button>' + (planOf(x.key).time ? '<button class="small-link" data-cleartime="1">Clear the time</button>' : "");
   };
 
-  // "Book this day": every stop with what it needs.
-  V.book = function () {
-    var list = S.myday.map(find).filter(Boolean);
-    if (!list.length) return '<div class="pad"><h1 class="app-title">Book this day</h1><div class="empty">My day is empty. Add some places first.</div><a class="pill solid" href="#myday" style="justify-self:start">Go to My day</a></div>';
-    var st = list.map(bookStatus), need = st.filter(function (s) { return s !== "walkin"; }).length, done = st.filter(function (s) { return s === "booked"; }).length;
-    return '<div class="pad"><button class="back" data-back="1">← My day</button><div class="myday-head"><span class="md-ico" aria-hidden="true">📅</span><div><h1 class="app-title">Book this day</h1><p class="sub">' + esc(fmtDate(S.dayDate)) + " · " + (need ? done + " of " + need + " booked" : "No bookings needed") + "</p></div></div>" +
-      (need ? '<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="' + need + '" aria-valuenow="' + done + '"><i style="width:' + Math.round(done / need * 100) + '%"></i></div>' : "") +
-      list.map(function (x, i) {
-        var s = st[i], p = planOf(x.key), bk = bookingOn(x.key, S.dayDate);
-        return '<article class="card book-row ' + s + '"><div class="h-row"><span><b>' + icon(x) + " " + esc(x.n) + '</b><br><small class="meta">' + esc(x.d) + (p.time ? " · " + fmtTime(p.time) : "") + "</small></span>" +
-          (s === "booked" ? '<span class="badge-ok">✅ Booked</span>' : s === "walkin" ? '<span class="badge-walk">🚶 Walk-in</span>' : '<span class="badge-todo">To book</span>') + "</div>" +
-          (s === "booked" ? '<small>' + esc(bookedLine(bk)) + '</small><button class="small-link" data-editbk="' + esc(bk.id) + '">Edit booking</button>'
-            : s === "walkin" ? '<button class="small-link" data-settime="' + esc(x.key) + '">' + (p.time ? "Change time" : "Add a time") + "</button>"
-            : '<div class="chips"><button class="pill solid" data-book="' + esc(x.key) + '">Book now</button><button class="pill" data-bookedit="' + esc(x.key) + '">Already booked</button></div>') + "</article>";
-      }).join("") +
-      (need && done === need ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">🎉</span><span><b>All booked!</b><small>Everything is saved in My day.</small></span></div>' : "") +
-      '<a class="cta cta-main" href="#myday">Done</a><a class="small-link" href="#bookings" style="justify-self:center">See all my bookings</a></div>';
-  };
+  // "Book this day" now lives in My day itself.
+  V.book = function () { return null; };
 
   // Every booking in one place: upcoming (by date), still to book, and past.
   function allBookings() {
@@ -979,24 +1006,20 @@
     return { up: up, todo: todo };
   }
   V.bookings = function () {
-    var today = todayISO(), all = allBookings();
+    var today = todayISO(), all = allBookings(), tab = S.bkTab || "up";
     var up = all.filter(function (o) { return (o.p.date || today) >= today; }), past = all.filter(function (o) { return (o.p.date || today) < today; }).reverse();
-    var todo = S.myday.map(find).filter(Boolean).filter(function (x) { return bookStatus(x) === "tobook"; });
+    var list = tab === "up" ? up : past, byDate = {}, dates = [];
+    list.forEach(function (o) { var d = o.p.date || today; if (!byDate[d]) { byDate[d] = []; dates.push(d); } byDate[d].push(o); });
     function row(o) {
       var p = o.p, x = o.x;
-      return '<li class="bk-item"><span class="bk-time">' + esc(fmtTime(p.time) || "–") + '</span><span style="min-width:0"><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc([x.d, p.party ? p.party + " people" : "", p.ref ? "ref " + p.ref : "", p.deposit ? "deposit" + (p.amount ? " HK$" + p.amount : "") + " paid" : ""].filter(String).join(" · ")) + "</small>" + (p.notes ? "<small>📝 " + esc(p.notes) + "</small>" : "") + '</span><button class="pill" data-editbk="' + esc(p.id) + '">Edit</button></li>';
+      return '<li><button class="bk-item" data-editbk="' + esc(p.id) + '"><span class="bk-time">' + esc(fmtTime(p.time) || "–") + '</span><span style="min-width:0"><b>' + icon(x) + " " + esc(x.n) + "</b><small>" + esc([x.d, p.party ? p.party + (p.party == 1 ? " person" : " people") : "", p.ref ? "ref " + p.ref : "", p.deposit ? "deposit paid" : ""].filter(String).join(" · ")) + '</small></span><span class="chev" aria-hidden="true">›</span></button></li>';
     }
-    var byDate = {}, dates = [];
-    up.forEach(function (o) { var d = o.p.date || today; if (!byDate[d]) { byDate[d] = []; dates.push(d); } byDate[d].push(o); });
-    return '<div class="pad"><div class="myday-head"><span class="md-ico" aria-hidden="true">📅</span><div><h1 class="app-title">My bookings</h1><p class="sub">Everything you’ve booked, and what’s left to book. Kept on this phone.</p></div></div>' +
-      '<span class="label">Still to book (' + todo.length + ")</span>" +
-      (todo.length ? '<ul class="list">' + todo.map(function (x) { var p = planOf(x.key); return '<li><div class="row"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(fmtDate(S.dayDate) + (p.time ? " · " + fmtTime(p.time) : "") + " · from My day") + '</small></span><button class="pill solid" data-book="' + esc(x.key) + '">Book</button></div></li>'; }).join("") + "</ul>"
-        : '<p class="sub" style="margin-top:-6px">Nothing waiting. Stops in My day that need booking show up here.</p>') +
-      '<span class="label">Upcoming (' + up.length + ")</span>" +
-      (dates.length ? dates.map(function (d) { return '<div class="bk-day"><h2>' + esc(d === today ? "Today · " + fmtDate(d) : fmtDate(d)) + '</h2><ul class="bk-list">' + byDate[d].map(row).join("") + "</ul></div>"; }).join("")
-        : '<div class="empty">No bookings yet. Book a place from its page, or use <b>Book this day</b> in My day.</div>') +
-      (past.length ? '<details class="bk-past"><summary>Past bookings (' + past.length + ')</summary><ul class="bk-list">' + past.map(function (o) { return row(o).replace('<span class="bk-time">', '<span class="bk-time">' + esc(fmtDate(o.p.date)) + "<br>"); }).join("") + '</ul><button class="small-link" data-clearpast="1">Clear past bookings</button></details>' : "") +
-      '<div class="chips"><a class="pill" href="#myday">📋 My day</a>' + (S.myday.length ? '<a class="pill" href="#book">📅 Book this day</a>' : "") + "</div></div>";
+    return '<div class="pad"><h1 class="app-title">Bookings</h1>' +
+      '<div class="seg"><button data-bktab="up" aria-pressed="' + (tab === "up") + '">Upcoming' + (up.length ? " · " + up.length : "") + '</button><button data-bktab="past" aria-pressed="' + (tab === "past") + '">Past' + (past.length ? " · " + past.length : "") + "</button></div>" +
+      (dates.length ? dates.map(function (d) { return '<div class="bk-day"><h2>' + esc(d === today ? "Today · " + fmtDate(d) : fmtDate(d)) + '</h2><ul class="bk-list">' + byDate[d].map(row).join("") + "</ul></div>"; }).join("") +
+          (tab === "past" ? '<button class="small-link" data-clearpast="1">Clear past bookings</button>' : "")
+        : '<div class="empty">' + (tab === "up" ? "No bookings yet. Tap <b>📅 Book</b> on a place, or on a stop in My day." : "No past bookings.") + "</div>") +
+      "</div>";
   };
 
   // Calendar file for the whole day
@@ -1046,33 +1069,34 @@
       (qs.length > 2 ? "&waypoints=" + encodeURIComponent(qs.slice(1, -1).join("|")) : "");
   }
   V.myday = function () {
-    var list = S.myday.map(find).filter(Boolean), total = 0, spots = daySpots(list);
+    var list = S.myday.map(find).filter(Boolean), total = 0, spots = daySpots(list), edit = S.editOrder && list.length > 1;
     for (var i = 1; i < list.length; i++) total += kmPts(spots[i - 1].ll, spots[i].ll);
+    var st = list.map(bookStatus), todo = st.filter(function (s) { return s === "tobook"; }).length, need = st.filter(function (s) { return s !== "walkin"; }).length;
+    var timed = list.filter(function (x) { return planOf(x.key).time || bookingOn(x.key, S.dayDate); }).length;
     var qq = S.mq.trim().toLowerCase(), last = list[list.length - 1];
     var picks = qq ? ALL.filter(function (x) { return !inDay(x.key) && [x.n, x.d, x.c || "", x.o].join(" ").toLowerCase().indexOf(qq) !== -1; }).sort(byRank).slice(0, 6)
       : last ? ALL.filter(function (x) { return !inDay(x.key) && x.rt >= 4.3; }).map(function (x) { return { x: x, k: distTo(x, spots[spots.length - 1].ll) }; }).sort(function (a, b) { return a.k - b.k; }).slice(0, 4).map(function (o) { return o.x; })
       : ALL.filter(function (x) { return x.rt === 5; }).slice(0, 4);
-    var st = list.map(bookStatus), need = st.filter(function (s) { return s !== "walkin"; }).length, done = st.filter(function (s) { return s === "booked"; }).length;
-    var timed = list.filter(function (x) { return planOf(x.key).time; }).length;
-    return '<div class="pad"><div class="myday-head"><span class="md-ico" aria-hidden="true">📋</span><div><h1 class="app-title">My day</h1><p class="sub">One list for all of Out &amp; About, kept on this phone.</p></div></div>' +
-      '<div class="md-strip" aria-hidden="true"><span>☕ Bean There</span><span>🍽️ Seconds, Please</span><span>🍸 Pour Decisions</span><span>✨ Sip &amp; Bite</span></div>' +
-      (list.length ? '<div class="day-date"><label for="day-date">📅 Plan for</label><input id="day-date" type="date" value="' + esc(S.dayDate) + '"><span class="meta">' + esc(fmtDate(S.dayDate)) + "</span></div>" +
-        '<a class="small-link" href="#bookings" style="justify-self:end">📅 All my bookings →</a>' +
-        (need ? '<a class="banner book-banner" href="#book"><span aria-hidden="true" style="font-size:24px">' + (done === need ? "🎉" : "📅") + "</span><span><b>" + (done === need ? "All booked" : "Book this day") + "</b><small>" + done + " of " + need + " booked" + (list.length - need ? " · " + (list.length - need) + " walk-in" : "") + '</small></span><span aria-hidden="true">→</span></a>' : "") : "") +
-      (list.length ? '<ol class="day-list">' + list.map(function (x, j) {
-        return (j ? '<li class="day-gap" aria-hidden="true">🚶 ' + walk(kmPts(spots[j - 1].ll, spots[j].ll)) + "</li>" : "") +
-          '<li class="day-item"><span class="num ' + (x.type === "dessert" ? "food" : x.type) + '">' + (j + 1) + '</span><span style="min-width:0"><button class="time-chip' + (planOf(x.key).time ? "" : " empty") + '" data-settime="' + esc(x.key) + '">' + (planOf(x.key).time ? "🕒 " + fmtTime(planOf(x.key).time) : "＋ time") + '</button><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc(spots[j].branch ? spots[j].branch.label + " branch" : x.d) + (x.o ? " · " + esc(x.o) : "") + "</small>" +
-          (st[j] === "booked" ? '<button class="st st-ok" data-editbk="' + esc(bookingOn(x.key, S.dayDate).id) + '">✅ Booked' + (bookedShort(bookingOn(x.key, S.dayDate)) ? " · " + esc(bookedShort(bookingOn(x.key, S.dayDate))) : "") + "</button>"
-            : st[j] === "walkin" ? '<span class="st st-walk">🚶 Walk-in</span>' : '<button class="st st-todo" data-book="' + esc(x.key) + '">🔲 Needs booking · Book</button>') + "</span>" +
-          '<span class="ctrl"><button data-up="' + j + '" aria-label="Move ' + esc(x.n) + ' up"' + (j ? "" : " disabled") + '>↑</button><button data-down="' + j + '" aria-label="Move ' + esc(x.n) + ' down"' + (j < list.length - 1 ? "" : " disabled") + '>↓</button><button data-rm="' + j + '" aria-label="Remove ' + esc(x.n) + '">✕</button></span></li>';
-      }).join("") + "</ol>" +
-        '<p class="meta" style="margin:0">' + plural(list.length, "stop") + (list.length > 1 ? " · about " + total.toFixed(1) + " km of walking" : "") + "</p>" +
-        '<div class="chips">' + (list.length > 2 ? '<button class="pill" data-optimise="1">✨ Suggest an order</button>' : "") + (timed > 1 ? '<button class="pill" data-sorttime="1">🕒 Sort by time</button>' : "") + '<a class="pill solid" href="' + esc(dayRouteUrl(list, spots)) + '" target="_blank" rel="noopener">🚶 Open in Google Maps</a>' + (timed ? '<button class="pill" data-ics="1">📆 Add to calendar</button>' : "") + '<button class="pill" data-shareday="1">Share</button><button class="pill" data-clear="1">Clear</button></div>'
+    var addStop = list.length >= 8 ? '<p class="sub">That’s 8 stops, the most Google Maps can route at once.</p>' :
+      '<details class="add-stop"' + (S.addOpen || !list.length ? " open" : "") + '><summary>＋ Add a stop</summary>' +
+      '<label class="search"><span aria-hidden="true">🔎</span><input id="mq" type="search" placeholder="Search any café, restaurant or bar…" value="' + esc(S.mq) + '" autocomplete="off" aria-label="Search places to add"></label>' +
+      (qq ? "" : '<p class="meta" style="margin:0">' + (last ? "Good places near " + esc(last.n) + ":" : "Some of Putri’s 5★ places:") + "</p>") +
+      '<ul class="list">' + picks.map(function (x) { return '<li><button class="row" data-add="' + esc(x.key) + '"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(x.d) + (x.rt != null ? " · ★ " + x.rt : "") + (last && !qq ? " · " + walk(distTo(x, spots[spots.length - 1].ll)) : "") + '</small></span><span class="score">＋</span></button></li>'; }).join("") + "</ul></details>";
+    return '<div class="pad"><div class="myday-head"><span class="md-ico" aria-hidden="true">📋</span><div><h1 class="app-title">My day</h1><p class="sub">One plan for all of Out &amp; About.</p></div></div>' +
+      (list.length ? '<div class="day-date"><input id="day-date" type="date" value="' + esc(S.dayDate) + '" aria-label="Day you’re planning"><span class="meta">' + esc(fmtDate(S.dayDate)) + "</span>" +
+        (need ? '<span class="left' + (todo ? "" : " done") + '">' + (todo ? todo + " left to book" : "All booked ✓") + "</span>" : "") + "</div>" +
+        '<ol class="day-list">' + list.map(function (x, j) {
+          var p = planOf(x.key), bk = bookingOn(x.key, S.dayDate), time = p.time || (bk && bk.time), s = st[j];
+          var right = edit ? '<span class="ctrl"><button data-up="' + j + '" aria-label="Move ' + esc(x.n) + ' up"' + (j ? "" : " disabled") + '>↑</button><button data-down="' + j + '" aria-label="Move ' + esc(x.n) + ' down"' + (j < list.length - 1 ? "" : " disabled") + '>↓</button><button data-rm="' + j + '" aria-label="Remove ' + esc(x.n) + '">✕</button></span>'
+            : s === "booked" ? '<span class="dr-st" title="Booked" aria-label="Booked">✅</span>' : s === "walkin" ? '<span class="dr-st" title="Walk-in" aria-label="Walk-in">🚶</span>' : '<button class="dr-book" data-book="' + esc(x.key) + '">📅 Book</button>';
+          return (j ? '<li class="day-gap" aria-hidden="true">🚶 ' + walk(kmPts(spots[j - 1].ll, spots[j].ll)) + "</li>" : "") +
+            '<li class="day-row"><button class="dr-main" data-stop="' + esc(x.key) + '"><span class="dr-time' + (time ? "" : " empty") + '">' + (time ? esc(fmtTime(time)) : "＋ time") + '</span><span class="dr-name"><b>' + icon(x) + " " + esc(x.n) + "</b><small>" + esc(spots[j].branch ? spots[j].branch.label + " branch" : x.d) + "</small></span></button>" + right + "</li>";
+        }).join("") + "</ol>" +
+        '<p class="meta" style="margin:0">' + plural(list.length, "stop") + (list.length > 1 ? " · about " + total.toFixed(1) + " km of walking" : "") + (edit ? "" : " · tap a stop for more") + "</p>" +
+        (edit ? '<div class="chips"><button class="pill solid" data-editorder="0">Done</button>' + (list.length > 2 ? '<button class="pill" data-optimise="1">✨ Shortest walk</button>' : "") + (timed > 1 ? '<button class="pill" data-sorttime="1">🕒 Sort by time</button>' : "") + '<button class="pill" data-clear="1">Clear all</button></div>'
+          : '<div class="chips"><a class="pill solid" href="' + esc(dayRouteUrl(list, spots)) + '" target="_blank" rel="noopener">🚶 Directions</a>' + (timed ? '<button class="pill" data-ics="1">📆 Calendar</button>' : "") + '<button class="pill" data-shareday="1">Share</button>' + (list.length > 1 ? '<button class="pill" data-editorder="1">Edit order</button>' : "") + "</div>")
         : '<div class="empty">Nothing here yet. Tap <b>＋ My day</b> on any café, restaurant or bar, or add a whole plan from Sip &amp; Bite.</div>') +
-      (list.length >= 8 ? '<p class="sub">That’s 8 stops, the most Google Maps can route at once.</p>' :
-        '<span class="label">Add a stop</span><label class="search"><span aria-hidden="true">🔎</span><input id="mq" type="search" placeholder="Search any café, restaurant or bar…" value="' + esc(S.mq) + '" autocomplete="off" aria-label="Search places to add"></label>' +
-        (qq ? "" : '<p class="meta" style="margin:-6px 0 0">' + (last ? "Good places near " + esc(last.n) + ":" : "Some of Putri’s 5★ places:") + "</p>") +
-        '<ul class="list">' + picks.map(function (x) { return '<li><button class="row" data-add="' + esc(x.key) + '"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(x.d) + (x.rt != null ? " · ★ " + x.rt : "") + (last && !qq ? " · " + walk(distTo(x, spots[spots.length - 1].ll)) : "") + '</small></span><span class="score">＋</span></button></li>'; }).join("") + "</ul>") + "</div>";
+      addStop + "</div>";
   };
 
   V.note = function () {
@@ -1118,7 +1142,7 @@
     if (r.name === "place") html = V.place(r.x);
     else html = V[r.name === "home" ? "home" : r.name]();
     if (html == null) { // results without a quiz yet
-      location.replace({ "food/results": "#food/quiz", "bar/results": "#bar/quiz", "sip/suggest": "#sip/plans" }[r.name] || "#"); return;
+      location.replace({ "food/results": "#food/quiz", "bar/results": "#bar/quiz", "sip/suggest": "#sip/plans", book: "#myday" }[r.name] || "#"); return;
     }
     var key = r.name + (r.x ? r.x.key : "");
     if (key !== lastKey) keep = false;
@@ -1221,8 +1245,19 @@
     if (d.editbk) { var eb = bookingById(d.editbk); if (eb) openSheet("details", eb.key, { id: eb.id }); return; }
     if (d.settime) { openSheet("time", d.settime); return; }
     if (d.party) { var pe = document.getElementById("b-party"); if (pe) { var nv = Math.max(1, Math.min(20, +pe.textContent + +d.party)); pe.textContent = nv; updateWa(); } return; }
+    if (d.booknext) { S.modal.extra.b = readWhen(); S.modal.extra.step = 2; renderModal(); return; }
+    if (d.bookback) { S.modal.extra.step = 1; renderModal(); return; }
+    if (d.bktab) { S.bkTab = d.bktab; render(true); return; }
+    if (d.editorder) { S.editOrder = d.editorder === "1"; render(true); return; }
+    if (d.stop) { openSheet("stop", d.stop); return; }
+    if (d.rmkey) { var ri = S.myday.indexOf(d.rmkey); if (ri !== -1) { S.myday.splice(ri, 1); saveDay(); } closeSheet(); render(true); return; }
+    if (d.saveddone) {
+      var sb = bookingById(S.modal.extra.id);
+      if (sb && document.getElementById("b-ref")) { var am = document.getElementById("b-amt").value.replace(/[^\d.]/g, ""); sb.ref = document.getElementById("b-ref").value.trim(); sb.deposit = document.getElementById("b-dep").checked || !!am; sb.amount = am; sb.notes = document.getElementById("b-notes").value.trim(); saveBookings(); }
+      closeSheet(); render(true); return;
+    }
     if (d.bookvia) {
-      var bx = find(S.modal.key), bw = readWhen(), opt = bookOptions(bx, bw).filter(function (o) { return o.id === d.bookvia; })[0];
+      var bx = find(S.modal.key), bw = S.modal.extra.b || readWhen(), opt = bookOptions(bx, bw).filter(function (o) { return o.id === d.bookvia; })[0];
       S.party = bw.party; save("oa-party", bw.party);
       S.pending = { key: bx.key, via: opt.id, b: bw, at: Date.now() };
       if (CFG.demoBooking) { openSheet("demo", bx.key, { opt: opt, b: bw }); return; }
@@ -1230,15 +1265,18 @@
       closeSheet(); return;
     }
     if (d.didprompt) { openSheet("did", S.modal.key, { b: S.pending && S.pending.b }); return; }
-    if (d.didyes) { openSheet("details", S.modal.key, { b: S.pending && S.pending.b }); S.pending = null; return; }
+    if (d.didyes) {
+      var dk = S.modal.key, db = (S.pending && S.pending.b) || draftFor(find(dk)), nb = addBooking(dk, db, S.pending ? S.pending.via : "");
+      S.pending = null; render(true); openSheet("saved", dk, { id: nb.id }); return;
+    }
     if (d.savebooking) {
       var sx = find(S.modal.key), w = readWhen(), amt = document.getElementById("b-amt").value.replace(/[^\d.]/g, "");
       var ref = document.getElementById("b-ref").value.trim(), dep = document.getElementById("b-dep").checked || !!amt, notes = document.getElementById("b-notes").value.trim();
       var eid = S.modal.extra.id, bk = eid && bookingById(eid);
       if (bk) { bk.date = w.date; bk.time = w.time; bk.party = w.party; bk.ref = ref; bk.deposit = dep; bk.amount = amt; bk.notes = notes; }
-      else S.bookings.push({ id: "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), key: sx.key, date: w.date, time: w.time, party: w.party, ref: ref, deposit: dep, amount: amt, notes: notes, via: S.pending ? S.pending.via : "" });
+      else { var nbk = addBooking(sx.key, w, S.pending ? S.pending.via : ""); nbk.ref = ref; nbk.deposit = dep; nbk.amount = amt; nbk.notes = notes; }
       saveBookings();
-      if (w.date === S.dayDate) { S.plan[sx.key] = S.plan[sx.key] || {}; S.plan[sx.key].time = w.time; savePlan(); if (!inDay(sx.key) && S.myday.length < 8) { S.myday.push(sx.key); saveDay(); } }
+      if (bk && w.date === S.dayDate) { S.plan[sx.key] = S.plan[sx.key] || {}; S.plan[sx.key].time = w.time; savePlan(); }
       S.party = w.party; save("oa-party", w.party);
       S.pending = null; closeSheet(); toast(w.date === S.dayDate ? "Booking saved in My day ✓" : "Booking saved for " + fmtDate(w.date) + " ✓"); render(true); return;
     }
@@ -1256,7 +1294,7 @@
       toast("Calendar file ready: open it to add your day"); return;
     }
     if (d.clearpast) { var td = todayISO(); S.bookings = S.bookings.filter(function (b) { return (b.date || td) >= td; }); saveBookings(); render(true); return; }
-    if (d.bookday) { d.bookday.split(",").forEach(function (k) { if (!inDay(k) && S.myday.length < 8) S.myday.push(k); }); saveDay(); location.hash = "#book"; return; }
+    if (d.bookday) { d.bookday.split(",").forEach(function (k) { if (!inDay(k) && S.myday.length < 8) S.myday.push(k); }); saveDay(); location.hash = "#myday"; setTimeout(function () { toast("Added. Tap 📅 Book on each stop that needs it"); }, 200); return; }
     if (d.notekind) { S.noteKind = d.notekind; render(true); return; }
     if (d.morebranches) { app.querySelectorAll(".more-branch").forEach(function (li) { li.hidden = false; }); t.remove(); return; }
     if (d.vote) {
@@ -1283,6 +1321,7 @@
     var el = document.getElementById("wa-preview"); if (!el || !S.modal) return;
     el.textContent = waMessage(readWhen());
   }
+  document.addEventListener("toggle", function (e) { if (e.target.classList && e.target.classList.contains("add-stop")) S.addOpen = e.target.open; }, true);
   document.getElementById("modal").addEventListener("click", function (e) { if (e.target.id === "modal") closeSheet(); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && S.modal) closeSheet(); });
   // Back from a booking page or WhatsApp: ask whether it worked.
@@ -1313,6 +1352,7 @@
   });
   document.addEventListener("change", function (e) {
     if (e.target.id === "budget" || e.target.id === "barbudget") render(true);
+    if (e.target.id === "stop-time" && S.modal) { var sk = S.modal.key; S.plan[sk] = S.plan[sk] || {}; S.plan[sk].time = e.target.value; savePlan(); render(true); toast("Time saved"); }
     if (e.target.id === "day-date" && e.target.value) { S.dayDate = e.target.value; save("oa-daydate", S.dayDate); render(true); }
     if ((e.target.id === "b-date" || e.target.id === "b-time") && S.modal) updateWa();
   });
