@@ -174,7 +174,11 @@
   function tagChips(x) { return x.tags.length ? '<div class="chips">' + x.tags.map(function (t) { return '<span class="chip">' + esc(TAGS[t] || t) + "</span>"; }).join("") + "</div>" : ""; }
 
   // Something sweet after a meal: Putri's dessert list if there is one, otherwise cafés known for cake and dessert places.
-  function sweetPool() { return DESSERTS.length ? DESSERTS.concat(FOOD.filter(function (f) { return f.sweet; })) : FOOD.filter(function (f) { return f.sweet; }).concat(CAFES.filter(function (c) { return c.sweet; })); }
+  // Desserts Putri has rated (plus dessert restaurants); before there was a dessert list, cafés known for cake filled in.
+  function sweetPool() {
+    var rated = DESSERTS.filter(function (x) { return x.rt != null; });
+    return rated.length ? rated.concat(FOOD.filter(function (f) { return f.sweet; })) : FOOD.filter(function (f) { return f.sweet; }).concat(CAFES.filter(function (c) { return c.sweet; }));
+  }
   function dessertsNear(x, n) {
     return sweetPool().filter(function (y) { return y !== x && (y.rt == null || y.rt >= 3.5); }).map(function (y) { var s = nearestSpot(y, where(x)); return { y: y, k: s.k, spot: s }; })
       .sort(function (a, b) { return a.k - b.k || (b.y.rt || 0) - (a.y.rt || 0); }).slice(0, n);
@@ -1368,7 +1372,7 @@
   // ---------- Start ----------
   Promise.all([
     loadTab(CFG.cafesCsvUrl, "data/cafes.csv"), loadTab(CFG.foodCsvUrl, "data/food.csv"),
-    loadTab(CFG.barsCsvUrl, "data/bars.csv"), loadTab(CFG.dessertCsvUrl, CFG.dessertCsvUrl ? "data/desserts.csv" : ""),
+    loadTab(CFG.barsCsvUrl, "data/bars.csv"), loadTab(CFG.dessertCsvUrl, "data/desserts.csv"),
     loadTab(CFG.branchesCsvUrl, "data/branches.csv")
   ]).then(function (res) {
     buildData(res[0], res[1], res[2], res[3], res[4]);
