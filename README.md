@@ -13,6 +13,7 @@ Shared by all four:
 - **Place pages** for every café, restaurant, bar and dessert spot: what to order, Putri's review, 👍/👎 votes, and nearby pairings. Restaurants always suggest **dessert after**, plus coffee and drinks.
 - **Near me** (uses the phone's location, or a district you pick), **Putri's page**, and **Send Putri a note** (suggest a place, report one that's closed, ideas, hellos).
 - **Closed places disappear.** Anything tagged `closed` or `temp-closed` in the sheet is left out of everything.
+- **Branches.** Places with several branches (NOC, Elephant Grounds, % Arabica…) count every open branch. Near me shows each place once, at the branch closest to you, with Putri's rating and which branch she visited. Place pages list the other branches with directions. My day and Sip & Bite use the branch nearest the previous stop, so routes stay short. Rankings and the district map still use the branch Putri reviewed.
 
 A static site (HTML, CSS and JavaScript, no build step) on GitHub Pages. Everything is free.
 
@@ -26,10 +27,11 @@ The **Review** Google Sheet. Each app tab is published as CSV and linked in `con
 | Seconds, Please | FOOD | Restaurant tab | `foodCsvUrl` (set) |
 | Pour Decisions | BAR | Bar tab | `barsCsvUrl` (empty until BAR is published) |
 | Desserts | DESSERT | Dessert tab | `dessertCsvUrl` (empty until DESSERT exists) |
+| Branches | BRANCHES | the monthly closed-place check | `branchesCsvUrl` (set) |
 
 The sheet's script (in the Bean There repo, [`apps-script/Code.gs`](https://github.com/Amabelnapitu/bean-there-by-putri/blob/main/apps-script/Code.gs)) keeps each app tab in sync with its review tab, fills in Rank and Tags, looks up locations, and runs the monthly closed-place check. See the Bean There README for how it works.
 
-If a link is empty or the sheet can't be reached, the app uses the saved copies in `data/` (`cafes.csv`, `food.csv`, `bars.csv`). Refresh them now and then by downloading each tab as CSV.
+If a link is empty or the sheet can't be reached, the app uses the saved copies in `data/` (`cafes.csv`, `food.csv`, `bars.csv`, `branches.csv`). Refresh them now and then by downloading each tab as CSV.
 
 ### BAR tab columns
 
@@ -42,6 +44,10 @@ Bars with no rating yet show as "Review soon" and stay out of Vibe Match and the
 Add a **Dessert** tab with the same columns as the Restaurant tab (Location, No, Name, Order, Price, Rate, Review). The next sync creates the DESSERT app tab by itself. Publish it as CSV and paste the link into `dessertCsvUrl`. Until then, "something sweet" suggestions come from HeSheEat and cafés known for cake, waffles or croissants.
 
 Optional: a **Dessert** column in the FOOD tab (e.g. "Tiramisu") makes that restaurant's page say "Stay for the tiramisu".
+
+### Branches
+
+The monthly closed-place check (in the sheet's script) finds every branch of each place on Google Maps and writes them to the **BRANCHES** tab. Only branches marked `open` are used. If Google matched something that isn't really a branch, type `yes` in its **Hide** column. Nothing else to maintain: new branches appear after the next monthly check.
 
 ### Tags the app understands
 

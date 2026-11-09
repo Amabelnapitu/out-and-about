@@ -63,7 +63,7 @@
   function isOpen(x) { return x.tags.indexOf("closed") === -1 && x.tags.indexOf("temp-closed") === -1; }
 
   // ---------- Data ----------
-  var CAFES = [], FOOD = [], BARS = [], RATED_BARS = [], DESSERTS = [], ALL = [], BYKEY = {};
+  var CAFES = [], FOOD = [], BARS = [], RATED_BARS = [], DESSERTS = [], ALL = [], BYKEY = {}, BR = {};
   var SWEET_RE = /cake|waffle|croissant|mochi|pancake|cookie|dessert|parfait|kakigori|pastr|muffin|tiramisu|gelato|ice cream/i;
   var BRUNCH_RE = /egg|toast|bagel|pancake|sando|croissant|benedict|waffle|muffin|taco rice|sandwich|brunch/i;
 
@@ -72,7 +72,26 @@
       no: o.note || "", tags: tagsOf(o.tags), maps: o.mapslink || "", ll: coords(o.latlng) };
   }
   function keyOf(x) { return x.type + "/" + slug(x.d) + "/" + slug(x.n); }
-  function buildData(c, f, b, s) {
+  // Branches from the BRANCHES tab (filled in by the monthly check): every open branch of each place, by kind + name.
+  function branchLabel(o, ll) {
+    var m = /\(([^)]+)\)\s*$/.exec(o.branch || "");
+    if (m && !/^\d/.test(m[1])) return m[1];
+    var parts = String(o.address || "").split(/,\s*/), i = parts.findIndex(function (s) { return /^(Hong Kong Island|Kowloon|New Territories)$/i.test(s.trim()); });
+    if (i > 0 && /^[A-Za-z][A-Za-z .'-]+$/.test(parts[i - 1].trim())) return parts[i - 1].trim();
+    var best = "", bk = 9;
+    Object.keys(CENTRE).forEach(function (d) { var k = kmPts(ll, CENTRE[d]); if (k < bk) { bk = k; best = d; } });
+    return bk < 1.5 ? best : "Another area";
+  }
+  function buildBranches(rows) {
+    BR = {}; var seen = {};
+    rows.forEach(function (o) {
+      var ll = coords(o.latlng), kind = (o.kind || "").toLowerCase();
+      if (!ll || !o.placeid || seen[kind + o.placeid] || /^(y|yes|x|true|✓)$/i.test((o.hide || "").trim()) || (o.status || "open").toLowerCase() !== "open") return;
+      seen[kind + o.placeid] = 1;
+      (BR[kind + "|" + slug(o.name)] = BR[kind + "|" + slug(o.name)] || []).push({ id: o.placeid, n: o.branch || o.name, addr: o.address || "", ll: ll, label: branchLabel(o, ll) });
+    });
+  }
+  function buildData(c, f, b, s, br) {
     CAFES = c.map(function (o) { var x = base(o, "cafe"); x.k = o.drink || ""; return x; }).filter(isOpen);
     FOOD = f.map(function (o) { var x = base(o, "food"); x.c = o.cuisine || ""; x.dessert = o.dessert || ""; return x; }).filter(isOpen);
     BARS = b.map(function (o) { var x = base(o, "bar"); x.kind = /both/i.test(o.type) ? "Both" : /club/i.test(o.type) ? "Club" : "Bar"; x.c = x.kind === "Both" ? "Bar → club" : x.kind; x.area = o.area || ""; return x; }).filter(isOpen);
@@ -84,8 +103,28 @@
     BYKEY = {};
     FOOD.concat(CAFES, BARS, DESSERTS).forEach(function (x) { x.key = keyOf(x); BYKEY[x.key] = x; });
     computeGeo();
+    buildBranches(br || []);
   }
   function find(key) { return BYKEY[key]; }
+  // Other branches of x: every open branch except the one Putri visited (anything within ~150 m of x itself).
+  function branchesOf(x) {
+    var own = where(x);
+    return (BR[x.type + "|" + slug(x.n)] || []).filter(function (b) { return kmPts(own, b.ll) > 0.15; });
+  }
+  // The spot of x (Putri's branch or another one) closest to a point.
+  function nearestSpot(x, pt) {
+    var best = { ll: where(x), branch: null, k: pt ? kmPts(pt, where(x)) : 0 };
+    if (!pt) return best;
+    branchesOf(x).forEach(function (b) { var k = kmPts(pt, b.ll); if (k < best.k) best = { ll: b.ll, branch: b, k: k }; });
+    return best;
+  }
+  function distTo(x, pt) { return nearestSpot(x, pt).k; }
+  function branchUrl(b) { return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(b.n + ", " + b.addr) + "&query_place_id=" + encodeURIComponent(b.id); }
+  function spotNote(x, spot) {
+    if (!spot || !spot.branch) return "";
+    var same = spot.branch.label === x.d;
+    return (same ? "Another " : "") + spot.branch.label + " branch" + (x.rt != null ? " · ★ " + x.rt : "") + (same ? " (Putri visited a different one)" : " (Putri visited the " + x.d + " one)");
+  }
 
   // ---------- Geography ----------
   var ISLAND = ["Kennedy Town", "HKU", "Sai Ying Pun", "Sheung Wan", "Central", "Admiralty", "Wan Chai", "Causeway Bay", "Tin Hau", "Fortress Hill", "North Point", "Quarry Bay", "Taikoo", "Sai Wan Ho", "Shau Kei Wan", "Chai Wan"];
@@ -133,13 +172,13 @@
   // Something sweet after a meal: Putri's dessert list if there is one, otherwise cafés known for cake and dessert places.
   function sweetPool() { return DESSERTS.length ? DESSERTS.concat(FOOD.filter(function (f) { return f.sweet; })) : FOOD.filter(function (f) { return f.sweet; }).concat(CAFES.filter(function (c) { return c.sweet; })); }
   function dessertsNear(x, n) {
-    return sweetPool().filter(function (y) { return y !== x && (y.rt == null || y.rt >= 3.5); }).map(function (y) { return { y: y, k: km(x, y) }; })
+    return sweetPool().filter(function (y) { return y !== x && (y.rt == null || y.rt >= 3.5); }).map(function (y) { var s = nearestSpot(y, where(x)); return { y: y, k: s.k, spot: s }; })
       .sort(function (a, b) { return a.k - b.k || (b.y.rt || 0) - (a.y.rt || 0); }).slice(0, n);
   }
   function dessertLine(r) {
     if (r.dessert) return '<p class="dessert-line">🍰 Stay for the <b>' + esc(r.dessert) + "</b></p>";
     var d = dessertsNear(r, 1)[0];
-    return d ? '<p class="dessert-line">🍰 Then dessert: <a href="' + href(d.y) + '">' + esc(d.y.n) + "</a> · " + walk(d.k) + "</p>" : "";
+    return d ? '<p class="dessert-line">🍰 Then dessert: <a href="' + href(d.y) + '">' + esc(d.y.n) + "</a>" + (d.spot.branch ? " (" + esc(d.spot.branch.label) + ")" : "") + " · " + walk(d.k) + "</p>" : "";
   }
 
   // ---------- Art ----------
@@ -327,9 +366,11 @@
   }
   function scoreSlot(x, kind, anchor, area) {
     var s = (x.rt || 3.5) / 5 * 66, why = [], t = function (k) { return x.tags.indexOf(k) !== -1; };
-    if (anchor) { var k = km(anchor, x); s += Math.max(0, 22 - k * 9); why.push(["plus", "🚶 " + walk(k) + " away"]); }
+    if (anchor) { var sp = nearestSpot(x, anchor), k = sp.k; s += Math.max(0, 22 - k * 9); why.push(["plus", "🚶 " + walk(k) + " away" + (sp.branch ? " (" + sp.branch.label + " branch)" : "")]); }
     else if (area && area !== "any") {
+      var ab = CENTRE[area] ? nearestSpot(x, CENTRE[area]) : null;
       if (x.d === area) { s += 22; why.push(["plus", "📍 In " + area]); }
+      else if (ab && ab.branch && ab.k < 0.8) { s += 20; why.push(["plus", "📍 Branch in " + area]); }
       else if (neighbours(area).indexOf(x.d) !== -1) { s += 14; why.push(["plus", "🚇 One stop away"]); }
       else s += Math.max(0, 10 - kmPts(CENTRE[area] || where(x), where(x)) * 3);
     } else s += 12;
@@ -345,7 +386,11 @@
     return slotsFor(p.need, p.time).map(function (sl, i) {
       var ranked = poolFor(sl[0]).filter(function (x) { return !used[x.key]; }).map(function (x) { return { x: x, m: scoreSlot(x, sl[0], prev, p.area) }; }).sort(function (a, b) { return b.m.score - a.m.score; });
       var pick = ranked.length ? ranked[(D.pswaps[i] || 0) % Math.min(ranked.length, 6)] : null;
-      if (pick) { used[pick.x.key] = 1; prev = pick.x; }
+      if (pick) {
+        used[pick.x.key] = 1;
+        pick.spot = nearestSpot(pick.x, prev || (p.area !== "any" ? CENTRE[p.area] : null));
+        prev = pick.spot.ll;
+      }
       return { kind: sl[0], when: sl[1], pick: pick, more: ranked.length > 1 };
     });
   }
@@ -362,19 +407,21 @@
   function planStops() {
     var D = S.day, area = neighbours(D.area), used = {}, prev = null;
     return PLANS[D.plan].stops.map(function (s, i) {
-      var pool = poolOf(s[0]).filter(function (x) { return area.indexOf(x.d) !== -1 && (x.rt == null ? s[0] === "dessert" : x.rt >= 3.9); });
-      var from = prev ? where(prev) : CENTRE[D.area];
+      var centre = CENTRE[D.area];
+      var pool = poolOf(s[0]).filter(function (x) { return (area.indexOf(x.d) !== -1 || (centre && branchesOf(x).some(function (b) { return kmPts(centre, b.ll) < 0.8; }))) && (x.rt == null ? s[0] === "dessert" : x.rt >= 3.9); });
+      var from = prev ? prev.spot.ll : centre;
       if (!pool.length && from) pool = poolOf(s[0]).filter(function (x) { return x.rt == null || x.rt >= 3.5; }).slice().sort(function (a, b) { return kmPts(from, where(a)) - kmPts(from, where(b)); }).slice(0, 6);
       pool.sort(function (a, b) {
         var home = (a.d === D.area ? 0 : 1) - (b.d === D.area ? 0 : 1);
         var lunch = s[2] === "lunch" ? ((b.tags.indexOf("lunch-set") !== -1 || b.tags.indexOf("value") !== -1) - (a.tags.indexOf("lunch-set") !== -1 || a.tags.indexOf("value") !== -1)) : 0;
-        var near = s[0] === "dessert" && prev ? km(prev, a) - km(prev, b) : 0;
+        var near = s[0] === "dessert" && prev ? distTo(a, prev.spot.ll) - distTo(b, prev.spot.ll) : 0;
         return lunch || near || home || byRank(a, b);
       });
       var free = pool.filter(function (x) { return !used[x.key]; });
       var pick = free.length ? free[(D.swaps[i] || 0) % free.length] : null;
-      if (pick) { used[pick.key] = 1; prev = pick; }
-      return { kind: s[0], when: s[1], x: pick, options: free.length };
+      var spot = pick ? nearestSpot(pick, from) : null;
+      if (pick) { used[pick.key] = 1; prev = { x: pick, spot: spot }; }
+      return { kind: s[0], when: s[1], x: pick, spot: spot, options: free.length };
     });
   }
 
@@ -679,7 +726,8 @@
         if (!s.pick) return '<div class="card"><span class="slot-when">' + esc(s.when) + '</span><p class="sub">Nothing nearby yet.</p></div>';
         var x = s.pick.x, m = s.pick.m;
         return '<article class="card"><div class="slot-when"><span>' + (i + 1) + ". " + esc(s.when) + "</span>" + (s.more ? '<button class="pill" data-pswap="' + i + '" aria-label="Show another option">↻ Another</button>' : "") + "</div>" +
-          '<div class="card-head" style="grid-template-columns:minmax(0,1fr) auto"><div><h3><a href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + '</a></h3><span class="meta">' + esc(x.d) + (x.c ? " · " + esc(x.c) : "") + (x.rt != null ? " · ★ " + x.rt : "") + (price(x) ? " · " + esc(price(x)) : "") + '</span></div><span class="match">' + m.score + "%</span></div>" +
+          '<div class="card-head" style="grid-template-columns:minmax(0,1fr) auto"><div><h3><a href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + '</a></h3><span class="meta">' + esc(s.pick.spot && s.pick.spot.branch ? s.pick.spot.branch.label + " branch" : x.d) + (x.c ? " · " + esc(x.c) : "") + (x.rt != null ? " · ★ " + x.rt : "") + (price(x) ? " · " + esc(price(x)) : "") + '</span></div><span class="match">' + m.score + "%</span></div>" +
+          (s.pick.spot && s.pick.spot.branch ? '<p class="meta" style="margin:0">Putri reviewed the ' + esc(x.d) + ' branch. <a href="' + esc(branchUrl(s.pick.spot.branch)) + '" target="_blank" rel="noopener">Directions to this one</a></p>' : "") +
           (x.o ? '<p class="order">' + (x.type === "cafe" ? "Get" : "Order") + ": <b>" + esc(x.o) + "</b></p>" : "") +
           (x.no ? '<p class="note">“' + esc(x.no) + "”</p>" : "") +
           '<div class="chips">' + m.why.map(function (w) { return '<span class="chip ' + w[0] + '">' + esc(w[1]) + "</span>"; }).join("") + "</div></article>";
@@ -693,10 +741,10 @@
       '<span class="label">What kind of day?</span><div class="seg">' + Object.keys(PLANS).map(function (k) { return '<button data-plan="' + k + '" aria-pressed="' + (D.plan === k) + '">' + PLANS[k].name + "</button>"; }).join("") + "</div>" +
       '<span class="label">Where?</span><div class="chips">' + areas.map(function (d) { return '<button class="pill" data-area="' + esc(d) + '" aria-pressed="' + (D.area === d) + '">' + esc(d) + "</button>"; }).join("") + "</div>" +
       '<div class="timeline">' + stops.map(function (s, i) {
-        var prev = i && stops[i - 1].x, ico = { cafe: "☕", food: "🍽️", bar: "🍸", club: "🪩", dessert: "🍰" }[s.kind];
-        return '<div class="stop"><span class="ico ' + (s.kind === "club" || s.kind === "bar" ? "bar" : s.kind === "dessert" ? "food" : s.kind) + '" aria-hidden="true">' + ico + '</span><div style="min-width:0"><span class="when">' + esc(s.when) + (prev && s.x ? " · " + walk(km(prev, s.x)) + " from the last stop" : "") + "</span>" +
+        var prev = i && stops[i - 1].spot, ico = { cafe: "☕", food: "🍽️", bar: "🍸", club: "🪩", dessert: "🍰" }[s.kind];
+        return '<div class="stop"><span class="ico ' + (s.kind === "club" || s.kind === "bar" ? "bar" : s.kind === "dessert" ? "food" : s.kind) + '" aria-hidden="true">' + ico + '</span><div style="min-width:0"><span class="when">' + esc(s.when) + (prev && s.x ? " · " + walk(kmPts(prev.ll, s.spot.ll)) + " from the last stop" : "") + "</span>" +
           (s.x ? '<div class="box"><div class="h-row"><a class="name" href="' + href(s.x) + '" style="font-weight:700;text-decoration:none">' + esc(s.x.n) + "</a>" + (s.options > 1 ? '<button class="pill" data-swap="' + i + '" aria-label="Swap this stop">↻</button>' : "") + "</div>" +
-            '<span class="meta">' + esc(s.x.d) + (s.x.rt != null ? " · ★ " + s.x.rt : "") + (s.x.o ? " · get " + esc(s.x.o) : "") + "</span></div>" : '<div class="box"><span class="meta">Nothing nearby yet.</span></div>') + "</div></div>";
+            '<span class="meta">' + esc(s.spot && s.spot.branch ? s.spot.branch.label + " branch (Putri reviewed " + s.x.d + ")" : s.x.d) + (s.x.rt != null ? " · ★ " + s.x.rt : "") + (s.x.o ? " · get " + esc(s.x.o) : "") + "</span></div>" : '<div class="box"><span class="meta">Nothing nearby yet.</span></div>') + "</div></div>";
       }).join("") + "</div>" +
       (got.length ? '<button class="pill solid" style="padding:10px" data-addall="' + esc(got.map(function (s) { return s.x.key; }).join(",")) + '">＋ Add this day to My day (then rearrange it)</button>' : "") + "</div>";
   };
@@ -716,34 +764,51 @@
   // Near me (uses the phone's location if allowed, otherwise a district you pick)
   V.near = function () {
     var N = S.near, pt = N.at || CENTRE[N.district];
-    var pool = ALL.filter(function (x) { return (N.type === "both" || x.type === N.type || (N.type === "food" && x.type === "dessert")) && (x.rt == null || x.rt >= 3.9); })
-      .map(function (x) { return { x: x, k: kmPts(pt, where(x)) }; }).sort(function (a, b) { return a.k - b.k || (b.x.rt || 0) - (a.x.rt || 0); }).slice(0, 12);
+    var groups = {};
+    ALL.filter(function (x) { return (N.type === "both" || x.type === N.type || (N.type === "food" && x.type === "dessert")) && (x.rt == null || x.rt >= 3.9); }).forEach(function (x) {
+      var s = nearestSpot(x, pt), g = x.type + "|" + slug(x.n), own = kmPts(pt, where(x));
+      // Places Putri reviewed twice (e.g. two NOCs) show once, with the review closest to you.
+      if (!groups[g] || s.k < groups[g].k - 1e-6 || (Math.abs(s.k - groups[g].k) < 1e-6 && own < groups[g].own)) groups[g] = { x: x, k: s.k, spot: s, own: own };
+    });
+    var pool = Object.keys(groups).map(function (g) { return groups[g]; }).sort(function (a, b) { return a.k - b.k || (b.x.rt || 0) - (a.x.rt || 0); }).slice(0, 12);
     return '<div class="pad"><h1 class="app-title">What’s near me?</h1>' +
       '<button class="pill solid" data-locate="1" style="justify-self:start">' + (N.locating ? "Finding you…" : N.at ? "📍 Using your location · refresh" : "📍 Use my location") + "</button>" +
       '<p class="sub">' + (N.at ? "Closest good places to where you are now." : "Or pick where you are:") + "</p>" +
       '<div class="chips">' + districtsOf(ALL).filter(function (d) { return CENTRE[d]; }).map(function (d) { return '<button class="pill" data-near="' + esc(d) + '" aria-pressed="' + (!N.at && N.district === d) + '">' + esc(d) + "</button>"; }).join("") + "</div>" +
       '<div class="seg"><button data-neartype="both" aria-pressed="' + (N.type === "both") + '">All</button><button data-neartype="cafe" aria-pressed="' + (N.type === "cafe") + '">☕ Coffee</button><button data-neartype="food" aria-pressed="' + (N.type === "food") + '">🍽️ Food</button><button data-neartype="bar" aria-pressed="' + (N.type === "bar") + '">🍸 Bars</button></div>' +
-      '<ul class="list">' + pool.map(function (o) { return '<li><a class="row" href="' + href(o.x) + '"><span class="n">' + icon(o.x) + "</span><span><b>" + esc(o.x.n) + "</b><small>" + esc(o.x.d) + (o.x.rt != null ? " · ★ " + o.x.rt : "") + '</small></span><span class="score">' + walk(o.k) + "</span></a></li>"; }).join("") + "</ul></div>";
+      '<ul class="list">' + pool.map(function (o) { return '<li><a class="row" href="' + href(o.x) + '"><span class="n">' + icon(o.x) + "</span><span><b>" + esc(o.x.n) + "</b><small>" + esc(o.spot.branch ? spotNote(o.x, o.spot) : o.x.d + (o.x.rt != null ? " · ★ " + o.x.rt : "")) + '</small></span><span class="score">' + walk(o.k) + "</span></a></li>"; }).join("") + "</ul></div>";
   };
 
   // Place page (same for cafés, restaurants, bars and dessert spots)
   V.place = function (x) {
-    function near(list, n) { return list.filter(function (y) { return y !== x && y.rt != null && y.rt >= 4; }).map(function (y) { return { y: y, k: km(x, y) }; }).sort(function (a, b) { return a.k - b.k || b.y.rt - a.y.rt; }).slice(0, n); }
+    function near(list, n) {
+      var seen = {};
+      return list.filter(function (y) { return y !== x && y.rt != null && y.rt >= 4; }).map(function (y) { var s = nearestSpot(y, where(x)); return { y: y, k: s.k, spot: s }; })
+        .sort(function (a, b) { return a.k - b.k || b.y.rt - a.y.rt; }).filter(function (o) { var g = o.y.type + slug(o.y.n); if (seen[g]) return false; seen[g] = 1; return true; }).slice(0, n);
+    }
     var sections = x.type === "food" ? [["🍰 Dessert after?", dessertsNear(x, 3)], ["☕ Coffee after?", near(CAFES, 3)], ["🍸 Drinks after?", near(RATED_BARS, 2)]]
       : x.type === "bar" ? [["🍽️ Dinner before?", near(FOOD, 3)]]
       : x.type === "dessert" ? [["🍽️ Eat first?", near(FOOD, 3)], ["☕ Coffee nearby?", near(CAFES, 2)]]
       : [["🍽️ Food nearby?", near(FOOD, 3)], ["🍰 Something sweet?", dessertsNear(x, 2)]];
-    function pairList(pairs) { return '<ul class="list">' + pairs.map(function (o) { return '<li><a class="row" href="' + href(o.y) + '"><span class="n">' + icon(o.y) + "</span><span><b>" + esc(o.y.n) + "</b><small>" + esc(o.y.d) + (o.y.rt != null ? " · ★ " + o.y.rt : "") + (o.y.o ? " · " + esc(o.y.o) : "") + '</small></span><span class="score">' + walk(o.k) + "</span></a></li>"; }).join("") + "</ul>"; }
+    function pairList(pairs) { return '<ul class="list">' + pairs.map(function (o) { return '<li><a class="row" href="' + href(o.y) + '"><span class="n">' + icon(o.y) + "</span><span><b>" + esc(o.y.n) + "</b><small>" + esc(o.spot && o.spot.branch ? spotNote(o.y, o.spot) : o.y.d + (o.y.rt != null ? " · ★ " + o.y.rt : "") + (o.y.o ? " · " + o.y.o : "")) + '</small></span><span class="score">' + walk(o.k) + "</span></a></li>"; }).join("") + "</ul>"; }
+    var others = branchesOf(x), from = S.near.at || where(x);
+    var twins = ALL.filter(function (y) { return y !== x && y.type === x.type && slug(y.n) === slug(x.n); });
+    var branchHtml = others.length ? '<span class="label">📍 Other branches (' + others.length + ")</span>" +
+      '<p class="sub" style="margin-top:-6px">Putri reviewed the ' + esc(x.d) + " branch; her rating is shown for all of them." + (S.near.at ? " Nearest to you first." : "") + "</p>" +
+      '<ul class="list">' + others.map(function (b) { return { b: b, k: kmPts(from, b.ll), twin: twins.filter(function (y) { return kmPts(where(y), b.ll) < 0.15; })[0] }; }).sort(function (a, c) { return a.k - c.k; }).map(function (o, i) {
+        var inner = '<span class="n">📍</span><span><b>' + esc(o.twin ? o.twin.d : o.b.label) + "</b><small>" + (o.twin ? "Putri reviewed this one too · ★ " + o.twin.rt : "★ " + x.rt + " (from the " + esc(x.d) + " branch)") + " · " + esc(o.b.addr.split(",").slice(0, 2).join(",")) + '</small></span><span class="score">' + walk(o.k) + "</span>";
+        return '<li' + (i >= 6 ? ' class="more-branch" hidden' : "") + ">" + (o.twin ? '<a class="row" href="' + href(o.twin) + '">' : '<a class="row" href="' + esc(branchUrl(o.b)) + '" target="_blank" rel="noopener">') + inner + "</a></li>";
+      }).join("") + "</ul>" + (others.length > 6 ? '<button class="small-link" data-morebranches="1">Show all ' + others.length + " branches</button>" : "") : "";
     var word = { cafe: "café", food: "restaurant", bar: x.kind === "Club" ? "club" : "bar", dessert: "dessert spot" }[x.type];
     return '<div class="pad"><button class="back" data-back="1">← Back</button>' +
       '<div class="card">' + (x.rk && x.rk <= 3 ? '<span class="label" style="margin:0">Putri’s #' + x.rk + " in " + esc(x.d) + "</span>" : "") +
       '<h1 class="app-title">' + esc(x.n) + '</h1><p class="sub">' + esc(x.d) + (x.type !== "cafe" && x.c ? " · " + esc(x.c) : "") + (x.area ? " · " + esc(x.area) : "") + "</p>" +
-      '<div class="stats4"><div class="stat"><b>' + (x.rt != null ? "★ " + x.rt : "–") + '</b><small>Putri’s rating</small></div><div class="stat"><b>' + esc(price(x) || "–") + "</b><small>" + (x.type === "food" ? "per person" : x.type === "bar" ? "per drink" : "price") + "</small></div></div></div>" +
+      '<div class="stats4"><div class="stat"><b>' + (x.rt != null ? "★ " + x.rt : "–") + '</b><small>Putri’s rating' + (branchesOf(x).length ? " · " + (branchesOf(x).length + 1) + " branches" : "") + '</small></div><div class="stat"><b>' + esc(price(x) || "–") + "</b><small>" + (x.type === "food" ? "per person" : x.type === "bar" ? "per drink" : "price") + "</small></div></div></div>" +
       (x.o ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">' + (x.type === "food" ? "🥢" : x.type === "bar" ? "🍸" : x.type === "dessert" ? "🍰" : "☕") + "</span><span><b>" + (x.type === "food" ? "Order this" : x.type === "bar" ? "Drink this" : "Get this") + "</b><small>" + esc(x.o) + "</small></span></div>" : "") +
       (x.dessert ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">🍰</span><span><b>Stay for dessert</b><small>' + esc(x.dessert) + "</small></span></div>" : "") +
       (x.no ? '<p class="note" style="font-size:16px">“' + esc(x.no) + "”</p>" : "") + tagChips(x) +
       '<div class="chips">' + addBtn(x) + '<a class="pill" href="' + esc(mapsUrl(x)) + '" target="_blank" rel="noopener">📍 Maps</a><button class="pill" data-share="1">Share</button></div>' +
-      voteBlock(x) +
+      voteBlock(x) + branchHtml +
       sections.filter(function (s) { return s[1].length; }).map(function (s) { return '<span class="label">' + s[0] + "</span>" + pairList(s[1]); }).join("") +
       '<button class="small-link" data-closed="' + esc(x.key) + '">Has this ' + word + " closed? Let Putri know</button></div>";
   };
@@ -767,27 +832,41 @@
       '<span class="label">The 5★ club (' + fives.length + ')</span><div class="chips">' + fives.map(function (x) { return '<a class="pill" href="' + href(x) + '">' + icon(x) + " " + esc(x.n) + "</a>"; }).join("") + "</div></div>";
   };
 
+  // Which branch each My day stop uses: the one nearest the stop before (the first uses your location, if known).
+  function daySpots(list) {
+    var out = [], prev = S.near.at || null;
+    list.forEach(function (x, i) { var s = i === 0 && !prev ? { ll: where(x), branch: null, k: 0 } : nearestSpot(x, prev); out.push(s); prev = s.ll; });
+    return out;
+  }
+  function stopQuery(x, s) { return s && s.branch ? s.branch.n + ", " + s.branch.addr : q(x); }
+  function dayRouteUrl(list, spots) {
+    if (!list.length) return "";
+    if (list.length === 1) return spots[0].branch ? branchUrl(spots[0].branch) : mapsUrl(list[0]);
+    var qs = list.map(function (x, i) { return stopQuery(x, spots[i]); });
+    return "https://www.google.com/maps/dir/?api=1&travelmode=walking&origin=" + encodeURIComponent(qs[0]) + "&destination=" + encodeURIComponent(qs[qs.length - 1]) +
+      (qs.length > 2 ? "&waypoints=" + encodeURIComponent(qs.slice(1, -1).join("|")) : "");
+  }
   V.myday = function () {
-    var list = S.myday.map(find).filter(Boolean), total = 0;
-    for (var i = 1; i < list.length; i++) total += km(list[i - 1], list[i]);
+    var list = S.myday.map(find).filter(Boolean), total = 0, spots = daySpots(list);
+    for (var i = 1; i < list.length; i++) total += kmPts(spots[i - 1].ll, spots[i].ll);
     var qq = S.mq.trim().toLowerCase(), last = list[list.length - 1];
     var picks = qq ? ALL.filter(function (x) { return !inDay(x.key) && [x.n, x.d, x.c || "", x.o].join(" ").toLowerCase().indexOf(qq) !== -1; }).sort(byRank).slice(0, 6)
-      : last ? ALL.filter(function (x) { return !inDay(x.key) && x.rt >= 4.3; }).map(function (x) { return { x: x, k: km(last, x) }; }).sort(function (a, b) { return a.k - b.k; }).slice(0, 4).map(function (o) { return o.x; })
+      : last ? ALL.filter(function (x) { return !inDay(x.key) && x.rt >= 4.3; }).map(function (x) { return { x: x, k: distTo(x, spots[spots.length - 1].ll) }; }).sort(function (a, b) { return a.k - b.k; }).slice(0, 4).map(function (o) { return o.x; })
       : ALL.filter(function (x) { return x.rt === 5; }).slice(0, 4);
     return '<div class="pad"><div class="myday-head"><span class="md-ico" aria-hidden="true">📋</span><div><h1 class="app-title">My day</h1><p class="sub">One list for all of Out &amp; About, kept on this phone.</p></div></div>' +
       '<div class="md-strip" aria-hidden="true"><span>☕ Bean There</span><span>🍽️ Seconds, Please</span><span>🍸 Pour Decisions</span><span>✨ Sip &amp; Bite</span></div>' +
       (list.length ? '<ol class="day-list">' + list.map(function (x, j) {
-        return (j ? '<li class="day-gap" aria-hidden="true">🚶 ' + walk(km(list[j - 1], x)) + "</li>" : "") +
-          '<li class="day-item"><span class="num ' + (x.type === "dessert" ? "food" : x.type) + '">' + (j + 1) + '</span><span style="min-width:0"><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc(x.d) + (x.o ? " · " + esc(x.o) : "") + "</small></span>" +
+        return (j ? '<li class="day-gap" aria-hidden="true">🚶 ' + walk(kmPts(spots[j - 1].ll, spots[j].ll)) + "</li>" : "") +
+          '<li class="day-item"><span class="num ' + (x.type === "dessert" ? "food" : x.type) + '">' + (j + 1) + '</span><span style="min-width:0"><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc(spots[j].branch ? spots[j].branch.label + " branch" : x.d) + (x.o ? " · " + esc(x.o) : "") + "</small></span>" +
           '<span class="ctrl"><button data-up="' + j + '" aria-label="Move ' + esc(x.n) + ' up"' + (j ? "" : " disabled") + '>↑</button><button data-down="' + j + '" aria-label="Move ' + esc(x.n) + ' down"' + (j < list.length - 1 ? "" : " disabled") + '>↓</button><button data-rm="' + j + '" aria-label="Remove ' + esc(x.n) + '">✕</button></span></li>';
       }).join("") + "</ol>" +
         '<p class="meta" style="margin:0">' + plural(list.length, "stop") + (list.length > 1 ? " · about " + total.toFixed(1) + " km of walking" : "") + "</p>" +
-        '<div class="chips">' + (list.length > 2 ? '<button class="pill" data-optimise="1">✨ Suggest an order</button>' : "") + '<a class="pill solid" href="' + esc(routeUrl(list)) + '" target="_blank" rel="noopener">🚶 Open in Google Maps</a><button class="pill" data-shareday="1">Share</button><button class="pill" data-clear="1">Clear</button></div>'
+        '<div class="chips">' + (list.length > 2 ? '<button class="pill" data-optimise="1">✨ Suggest an order</button>' : "") + '<a class="pill solid" href="' + esc(dayRouteUrl(list, spots)) + '" target="_blank" rel="noopener">🚶 Open in Google Maps</a><button class="pill" data-shareday="1">Share</button><button class="pill" data-clear="1">Clear</button></div>'
         : '<div class="empty">Nothing here yet. Tap <b>＋ My day</b> on any café, restaurant or bar, or add a whole plan from Sip &amp; Bite.</div>') +
       (list.length >= 8 ? '<p class="sub">That’s 8 stops, the most Google Maps can route at once.</p>' :
         '<span class="label">Add a stop</span><label class="search"><span aria-hidden="true">🔎</span><input id="mq" type="search" placeholder="Search any café, restaurant or bar…" value="' + esc(S.mq) + '" autocomplete="off" aria-label="Search places to add"></label>' +
         (qq ? "" : '<p class="meta" style="margin:-6px 0 0">' + (last ? "Good places near " + esc(last.n) + ":" : "Some of Putri’s 5★ places:") + "</p>") +
-        '<ul class="list">' + picks.map(function (x) { return '<li><button class="row" data-add="' + esc(x.key) + '"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(x.d) + (x.rt != null ? " · ★ " + x.rt : "") + (last && !qq ? " · " + walk(km(last, x)) : "") + '</small></span><span class="score">＋</span></button></li>'; }).join("") + "</ul>") + "</div>";
+        '<ul class="list">' + picks.map(function (x) { return '<li><button class="row" data-add="' + esc(x.key) + '"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(x.d) + (x.rt != null ? " · ★ " + x.rt : "") + (last && !qq ? " · " + walk(distTo(x, spots[spots.length - 1].ll)) : "") + '</small></span><span class="score">＋</span></button></li>'; }).join("") + "</ul>") + "</div>";
   };
 
   V.note = function () {
@@ -905,10 +984,11 @@
     if (d.clear) { if (confirm("Clear My day?")) { S.myday = []; saveDay(); render(true); } return; }
     if (d.optimise) {
       var list = S.myday.map(find).filter(Boolean), out = [list.shift()];
-      while (list.length) { var last = out[out.length - 1], bi = 0; list.forEach(function (x, j) { if (km(last, x) < km(last, list[bi])) bi = j; }); out.push(list.splice(bi, 1)[0]); }
+      var at = daySpots([out[0]])[0].ll;
+      while (list.length) { var bi = 0; list.forEach(function (x, j) { if (distTo(x, at) < distTo(list[bi], at)) bi = j; }); var nx = list.splice(bi, 1)[0]; at = nearestSpot(nx, at).ll; out.push(nx); }
       S.myday = out.map(function (x) { return x.key; }); saveDay(); toast("Shortest walking order ✓"); render(true); return;
     }
-    if (d.shareday) { var l = S.myday.map(find).filter(Boolean); shareLink("My day", "My day out, planned with Out & About by Putri: " + l.map(function (x) { return x.n; }).join(" → "), routeUrl(l)); return; }
+    if (d.shareday) { var l = S.myday.map(find).filter(Boolean); shareLink("My day", "My day out, planned with Out & About by Putri: " + l.map(function (x) { return x.n; }).join(" → "), dayRouteUrl(l, daySpots(l))); return; }
     if (d.share) { var x0 = current().x; if (x0) shareLink(x0.n, x0.n + " (" + x0.d + "), recommended by Putri on Out & About", location.href); return; }
     if (d.lunch) { S.food.lunch = !S.food.lunch; render(true); return; }
     if (d.spinloc) { S[current().module].spinLoc = d.spinloc; render(true); return; }
@@ -930,6 +1010,7 @@
       return;
     }
     if (d.notekind) { S.noteKind = d.notekind; render(true); return; }
+    if (d.morebranches) { app.querySelectorAll(".more-branch").forEach(function (li) { li.hidden = false; }); t.remove(); return; }
     if (d.vote) {
       var px = find(d.key); if (!px) return;
       if (!API) { toast("Votes open soon."); return; }
@@ -985,9 +1066,10 @@
   // ---------- Start ----------
   Promise.all([
     loadTab(CFG.cafesCsvUrl, "data/cafes.csv"), loadTab(CFG.foodCsvUrl, "data/food.csv"),
-    loadTab(CFG.barsCsvUrl, "data/bars.csv"), loadTab(CFG.dessertCsvUrl, CFG.dessertCsvUrl ? "data/desserts.csv" : "")
+    loadTab(CFG.barsCsvUrl, "data/bars.csv"), loadTab(CFG.dessertCsvUrl, CFG.dessertCsvUrl ? "data/desserts.csv" : ""),
+    loadTab(CFG.branchesCsvUrl, "data/branches.csv")
   ]).then(function (res) {
-    buildData(res[0], res[1], res[2], res[3]);
+    buildData(res[0], res[1], res[2], res[3], res[4]);
     var before = S.myday.length;
     S.myday = S.myday.filter(function (k) { return BYKEY[k]; });
     if (S.myday.length !== before) { saveDay(); setTimeout(function () { toast("A place in My day has closed, so it was removed."); }, 400); }
