@@ -397,3 +397,5 @@ body.modal-open { overflow: hidden; }
 .bk-past summary { cursor: pointer; font-weight: 700; }
 .bk-past .bk-list { margin-top: 10px; }
 .bk-past .bk-item { border-left-color: var(--line); opacity: .8; }
+.bk-line { align-items: center; border-top: 1px dashed color-mix(in srgb, var(--good) 30%, var(--line)); padding-top: 6px; }
+.bk-line small { display: block; }

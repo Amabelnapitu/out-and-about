@@ -243,8 +243,15 @@
     near: { at: null, label: "", district: "Central", type: "both", locating: false },
     quiz: null, cooking: null,
     votes: {}, myVotes: load("oa-myvotes", {}), noteKind: "food",
-    plan: load("oa-plan", {}), dayDate: load("oa-daydate", ""), party: load("oa-party", 2), modal: null, pending: null
+    plan: load("oa-plan", {}), bookings: load("oa-bookings", []), dayDate: load("oa-daydate", ""), party: load("oa-party", 2), modal: null, pending: null
   };
+  // Older versions kept one booking per place inside the plan: move those into the list.
+  Object.keys(S.plan).forEach(function (k) {
+    var p = S.plan[k]; if (!p || !p.booked) return;
+    S.bookings.push({ id: "b" + Math.random().toString(36).slice(2, 9), key: k, date: p.date, time: p.time, party: p.party, ref: p.ref || "", deposit: !!p.deposit, amount: p.amount || "", notes: p.notes || "", via: p.via || "" });
+    S.plan[k] = p.time ? { time: p.time } : undefined;
+    save("oa-bookings", S.bookings); save("oa-plan", S.plan);
+  });
   if (!S.dayDate || S.dayDate < new Date(Date.now() - 864e5).toISOString().slice(0, 10)) S.dayDate = new Date().getFullYear() + "-" + ("0" + (new Date().getMonth() + 1)).slice(-2) + "-" + ("0" + new Date().getDate()).slice(-2);
   function inDay(key) { return S.myday.indexOf(key) !== -1; }
   function saveDay() { save("oa-myday", S.myday); }
@@ -849,7 +856,13 @@
     if (!out.length) out.push({ id: "maps", icon: "📍", label: "Find their number on Google Maps", sub: "Putri hasn’t added booking details yet", href: mapsUrl(x) });
     return out;
   }
-  function bookStatus(x) { var p = planOf(x.key); return p.booked ? "booked" : isWalkIn(x) ? "walkin" : "tobook"; }
+  // Bookings are a list, so the same place can be booked on several dates.
+  function saveBookings() { save("oa-bookings", S.bookings); }
+  function byWhen(a, b) { var A = (a.date || "") + (a.time || ""), B = (b.date || "") + (b.time || ""); return A < B ? -1 : A > B ? 1 : 0; }
+  function bookingById(id) { return S.bookings.filter(function (b) { return b.id === id; })[0]; }
+  function bookingOn(key, date) { return S.bookings.filter(function (b) { return b.key === key && b.date === date; }).sort(byWhen)[0]; }
+  function upcomingFor(key) { var td = todayISO(); return S.bookings.filter(function (b) { return b.key === key && (b.date || td) >= td; }).sort(byWhen); }
+  function bookStatus(x) { return bookingOn(x.key, S.dayDate) ? "booked" : isWalkIn(x) ? "walkin" : "tobook"; }
   function bookedLine(p) {
     return [fmtDate(p.date), fmtTime(p.time), p.party ? plural(+p.party, "person").replace("persons", "people") : "", p.ref ? "ref " + p.ref : "", p.deposit ? "deposit" + (p.amount ? " HK$" + p.amount : "") + " paid" : ""].filter(String).join(" · ");
   }
@@ -858,20 +871,23 @@
   }
   function suggestTime(x) {
     var p = planOf(x.key); if (p.time) return p.time;
+    var bk = bookingOn(x.key, S.dayDate); if (bk && bk.time) return bk.time;
     var i = S.myday.indexOf(x.key);
     for (var j = i - 1; j >= 0; j--) { var prev = find(S.myday[j]), pt = planOf(S.myday[j]).time; if (prev && pt) return addMins(pt, (STAY[prev.type] || 60) + 15); }
     return { cafe: "11:00", food: "19:00", dessert: "20:30", bar: "21:30" }[x.type] || "12:00";
   }
-  function draftFor(x) { var p = planOf(x.key); return { date: p.date || S.dayDate, time: suggestTime(x), party: p.party || S.party }; }
+  function draftFor(x) { return { date: S.dayDate, time: suggestTime(x), party: S.party }; }
 
   function bookCard(x) {
-    var st = bookStatus(x), k = bookingOf(x), p = planOf(x.key);
-    if (st === "booked") return '<div class="book-card booked"><div class="h-row"><b>✅ You’re booked</b><button class="pill" data-bookedit="' + esc(x.key) + '">Edit</button></div><small>' + esc(bookedLine(p)) + "</small>" + (p.notes ? "<small>📝 " + esc(p.notes) + "</small>" : "") + "</div>";
-    if (st === "walkin") return '<div class="book-card"><b>🚶 Walk-in' + (/walk/i.test(k.note || "") ? "" : ", usually") + "</b><small>" + esc(k.note && !/^walk[\s-]?in( only)?\.?$/i.test(k.note) ? k.note : "No booking needed. Just turn up.") + "</small></div>";
+    var k = bookingOf(x), ups = upcomingFor(x.key);
+    var mine = ups.length ? '<div class="book-card booked"><b>✅ You’re booked' + (ups.length > 1 ? " (" + ups.length + " dates)" : "") + "</b>" + ups.map(function (b) {
+      return '<div class="h-row bk-line"><span><small>' + esc(bookedLine(b)) + "</small>" + (b.notes ? "<small>📝 " + esc(b.notes) + "</small>" : "") + '</span><button class="pill" data-editbk="' + esc(b.id) + '">Edit</button></div>';
+    }).join("") + "</div>" : "";
+    if (isWalkIn(x) && !ups.length) return '<div class="book-card"><b>🚶 Walk-in' + (/walk/i.test(k.note || "") ? "" : ", usually") + "</b><small>" + esc(k.note && !/^walk[\s-]?in( only)?\.?$/i.test(k.note) ? k.note : "No booking needed. Just turn up.") + "</small></div>";
     var opt = bookOptions(x, draftFor(x))[0];
-    return '<div class="book-card"><div class="h-row"><b>📅 Booking</b>' + (k.note ? '<span class="meta">' + esc(k.note) + "</span>" : "") + "</div>" +
-      '<button class="cta cta-main" data-book="' + esc(x.key) + '">' + opt.icon + " " + esc(opt.id === "maps" ? "How to book" : opt.label) + "</button>" +
-      '<button class="small-link" data-bookedit="' + esc(x.key) + '">Already booked? Add the details</button></div>';
+    return mine + '<div class="book-card"><div class="h-row"><b>📅 ' + (ups.length ? "Book another date" : "Booking") + "</b>" + (k.note ? '<span class="meta">' + esc(k.note) + "</span>" : "") + "</div>" +
+      (isWalkIn(x) ? "<small>Usually walk-in, so no booking is needed.</small>" : '<button class="cta ' + (ups.length ? "cta-ghost" : "cta-main") + '" data-book="' + esc(x.key) + '">' + opt.icon + " " + esc(opt.id === "maps" ? "How to book" : opt.label) + "</button>") +
+      '<button class="small-link" data-bookedit="' + esc(x.key) + '">' + (ups.length ? "Booked another date? Add it" : "Already booked? Add the details") + "</button></div>";
   }
 
   // Bottom sheets
@@ -920,12 +936,13 @@
       '<button class="cta cta-main" data-didyes="1">✅ Yes, add my booking</button><button class="cta cta-ghost" data-closesheet="1">Not yet</button>';
   };
   SHEETS.details = function (x, m) {
-    var p = planOf(x.key), b = { date: p.date || (m.extra.b && m.extra.b.date) || S.dayDate, time: p.time || (m.extra.b && m.extra.b.time) || suggestTime(x), party: p.party || (m.extra.b && m.extra.b.party) || S.party };
-    return '<span class="label" style="margin:0">' + icon(x) + " " + esc(x.n) + '</span><h2 id="sheet-title" class="app-title" style="font-size:24px">Your booking</h2>' + whenFields(b) +
+    var p = (m.extra.id && bookingById(m.extra.id)) || {}, d = m.extra.b || {};
+    var b = { date: p.date || d.date || S.dayDate, time: p.time || d.time || suggestTime(x), party: p.party || d.party || S.party };
+    return '<span class="label" style="margin:0">' + icon(x) + " " + esc(x.n) + '</span><h2 id="sheet-title" class="app-title" style="font-size:24px">' + (p.id ? "Your booking" : "Add a booking") + "</h2>" + whenFields(b) +
       '<div class="field"><label for="b-ref">Confirmation number <span class="meta">(optional)</span></label><input id="b-ref" maxlength="40" value="' + esc(p.ref || "") + '" autocomplete="off"></div>' +
       '<div class="field"><label class="check"><input type="checkbox" id="b-dep"' + (p.deposit ? " checked" : "") + '> I paid a deposit</label><input id="b-amt" inputmode="numeric" placeholder="Amount in HK$ (optional)" maxlength="8" value="' + esc(p.amount || "") + '"></div>' +
       '<div class="field"><label for="b-notes">Notes <span class="meta">(optional)</span></label><input id="b-notes" maxlength="120" placeholder="e.g. window seat, birthday cake" value="' + esc(p.notes || "") + '"></div>' +
-      '<button class="cta cta-main" data-savebooking="1">Save booking</button>' + (p.booked ? '<button class="small-link" data-unbook="1">Remove this booking</button>' : "");
+      '<button class="cta cta-main" data-savebooking="1">Save booking</button>' + (p.id ? '<button class="small-link" data-unbook="1">Remove this booking</button>' : "");
   };
   SHEETS.time = function (x) {
     return '<span class="label" style="margin:0">' + icon(x) + " " + esc(x.n) + '</span><h2 id="sheet-title" class="app-title" style="font-size:24px">What time?</h2>' +
@@ -941,10 +958,10 @@
     return '<div class="pad"><button class="back" data-back="1">← My day</button><div class="myday-head"><span class="md-ico" aria-hidden="true">📅</span><div><h1 class="app-title">Book this day</h1><p class="sub">' + esc(fmtDate(S.dayDate)) + " · " + (need ? done + " of " + need + " booked" : "No bookings needed") + "</p></div></div>" +
       (need ? '<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="' + need + '" aria-valuenow="' + done + '"><i style="width:' + Math.round(done / need * 100) + '%"></i></div>' : "") +
       list.map(function (x, i) {
-        var s = st[i], p = planOf(x.key);
+        var s = st[i], p = planOf(x.key), bk = bookingOn(x.key, S.dayDate);
         return '<article class="card book-row ' + s + '"><div class="h-row"><span><b>' + icon(x) + " " + esc(x.n) + '</b><br><small class="meta">' + esc(x.d) + (p.time ? " · " + fmtTime(p.time) : "") + "</small></span>" +
           (s === "booked" ? '<span class="badge-ok">✅ Booked</span>' : s === "walkin" ? '<span class="badge-walk">🚶 Walk-in</span>' : '<span class="badge-todo">To book</span>') + "</div>" +
-          (s === "booked" ? '<small>' + esc(bookedLine(p)) + '</small><button class="small-link" data-bookedit="' + esc(x.key) + '">Edit booking</button>'
+          (s === "booked" ? '<small>' + esc(bookedLine(bk)) + '</small><button class="small-link" data-editbk="' + esc(bk.id) + '">Edit booking</button>'
             : s === "walkin" ? '<button class="small-link" data-settime="' + esc(x.key) + '">' + (p.time ? "Change time" : "Add a time") + "</button>"
             : '<div class="chips"><button class="pill solid" data-book="' + esc(x.key) + '">Book now</button><button class="pill" data-bookedit="' + esc(x.key) + '">Already booked</button></div>') + "</article>";
       }).join("") +
@@ -954,8 +971,7 @@
 
   // Every booking in one place: upcoming (by date), still to book, and past.
   function allBookings() {
-    return Object.keys(S.plan).filter(function (k) { return S.plan[k] && S.plan[k].booked && find(k); }).map(function (k) { return { x: find(k), p: S.plan[k] }; })
-      .sort(function (a, b) { var A = (a.p.date || "") + (a.p.time || ""), B = (b.p.date || "") + (b.p.time || ""); return A < B ? -1 : A > B ? 1 : 0; });
+    return S.bookings.filter(function (b) { return find(b.key); }).slice().sort(byWhen).map(function (b) { return { x: find(b.key), p: b }; });
   }
   function bookingCounts() {
     var today = todayISO(), up = allBookings().filter(function (o) { return (o.p.date || today) >= today; }).length;
@@ -968,7 +984,7 @@
     var todo = S.myday.map(find).filter(Boolean).filter(function (x) { return bookStatus(x) === "tobook"; });
     function row(o) {
       var p = o.p, x = o.x;
-      return '<li class="bk-item"><span class="bk-time">' + esc(fmtTime(p.time) || "–") + '</span><span style="min-width:0"><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc([x.d, p.party ? p.party + " people" : "", p.ref ? "ref " + p.ref : "", p.deposit ? "deposit" + (p.amount ? " HK$" + p.amount : "") + " paid" : ""].filter(String).join(" · ")) + "</small>" + (p.notes ? "<small>📝 " + esc(p.notes) + "</small>" : "") + '</span><button class="pill" data-bookedit="' + esc(x.key) + '">Edit</button></li>';
+      return '<li class="bk-item"><span class="bk-time">' + esc(fmtTime(p.time) || "–") + '</span><span style="min-width:0"><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc([x.d, p.party ? p.party + " people" : "", p.ref ? "ref " + p.ref : "", p.deposit ? "deposit" + (p.amount ? " HK$" + p.amount : "") + " paid" : ""].filter(String).join(" · ")) + "</small>" + (p.notes ? "<small>📝 " + esc(p.notes) + "</small>" : "") + '</span><button class="pill" data-editbk="' + esc(p.id) + '">Edit</button></li>';
     }
     var byDate = {}, dates = [];
     up.forEach(function (o) { var d = o.p.date || today; if (!byDate[d]) { byDate[d] = []; dates.push(d); } byDate[d].push(o); });
@@ -986,8 +1002,8 @@
   // Calendar file for the whole day
   function icsFor(list) {
     function stamp(date, time) { return date.replace(/-/g, "") + "T" + time.replace(":", "") + "00"; }
-    var ev = list.filter(function (x) { return planOf(x.key).time; }).map(function (x) {
-      var p = planOf(x.key), date = p.date || S.dayDate, end = addMins(p.time, STAY[x.type] || 60);
+    var ev = list.filter(function (x) { return planOf(x.key).time || (bookingOn(x.key, S.dayDate) || {}).time; }).map(function (x) {
+      var bk = bookingOn(x.key, S.dayDate), p = Object.assign({}, bk || {}, { booked: !!bk, time: planOf(x.key).time || bk.time }), date = S.dayDate, end = addMins(p.time, STAY[x.type] || 60);
       var desc = [p.booked ? "Booked" + (p.ref ? " · ref " + p.ref : "") + (p.deposit ? " · deposit" + (p.amount ? " HK$" + p.amount : "") + " paid" : "") : isWalkIn(x) ? "Walk-in" : "Not booked yet", x.o ? (x.type === "cafe" ? "Get: " : "Order: ") + x.o : "", p.notes || "", "Out & About by Putri"].filter(String).join("\\n");
       return ["BEGIN:VEVENT", "UID:" + x.key.replace(/[^a-z0-9]/gi, "") + date.replace(/-/g, "") + "@out-and-about", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z",
         "DTSTART;TZID=Asia/Hong_Kong:" + stamp(date, p.time), "DTEND;TZID=Asia/Hong_Kong:" + stamp(end < p.time ? date : date, end),
@@ -1046,7 +1062,7 @@
       (list.length ? '<ol class="day-list">' + list.map(function (x, j) {
         return (j ? '<li class="day-gap" aria-hidden="true">🚶 ' + walk(kmPts(spots[j - 1].ll, spots[j].ll)) + "</li>" : "") +
           '<li class="day-item"><span class="num ' + (x.type === "dessert" ? "food" : x.type) + '">' + (j + 1) + '</span><span style="min-width:0"><button class="time-chip' + (planOf(x.key).time ? "" : " empty") + '" data-settime="' + esc(x.key) + '">' + (planOf(x.key).time ? "🕒 " + fmtTime(planOf(x.key).time) : "＋ time") + '</button><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc(spots[j].branch ? spots[j].branch.label + " branch" : x.d) + (x.o ? " · " + esc(x.o) : "") + "</small>" +
-          (st[j] === "booked" ? '<button class="st st-ok" data-bookedit="' + esc(x.key) + '">✅ Booked' + (bookedShort(planOf(x.key)) ? " · " + esc(bookedShort(planOf(x.key))) : "") + "</button>"
+          (st[j] === "booked" ? '<button class="st st-ok" data-editbk="' + esc(bookingOn(x.key, S.dayDate).id) + '">✅ Booked' + (bookedShort(bookingOn(x.key, S.dayDate)) ? " · " + esc(bookedShort(bookingOn(x.key, S.dayDate))) : "") + "</button>"
             : st[j] === "walkin" ? '<span class="st st-walk">🚶 Walk-in</span>' : '<button class="st st-todo" data-book="' + esc(x.key) + '">🔲 Needs booking · Book</button>') + "</span>" +
           '<span class="ctrl"><button data-up="' + j + '" aria-label="Move ' + esc(x.n) + ' up"' + (j ? "" : " disabled") + '>↑</button><button data-down="' + j + '" aria-label="Move ' + esc(x.n) + ' down"' + (j < list.length - 1 ? "" : " disabled") + '>↓</button><button data-rm="' + j + '" aria-label="Remove ' + esc(x.n) + '">✕</button></span></li>';
       }).join("") + "</ol>" +
@@ -1178,7 +1194,7 @@
       while (list.length) { var bi = 0; list.forEach(function (x, j) { if (distTo(x, at) < distTo(list[bi], at)) bi = j; }); var nx = list.splice(bi, 1)[0]; at = nearestSpot(nx, at).ll; out.push(nx); }
       S.myday = out.map(function (x) { return x.key; }); saveDay(); toast("Shortest walking order ✓"); render(true); return;
     }
-    if (d.shareday) { var l = S.myday.map(find).filter(Boolean); shareLink("My day", "My day out (" + fmtDate(S.dayDate) + "), planned with Out & About by Putri:\n" + l.map(function (x) { var p = planOf(x.key); return (p.time ? fmtTime(p.time) + " " : "") + x.n + (p.booked ? " ✅" : ""); }).join("\n") + "\nRoute:", dayRouteUrl(l, daySpots(l))); return; }
+    if (d.shareday) { var l = S.myday.map(find).filter(Boolean); shareLink("My day", "My day out (" + fmtDate(S.dayDate) + "), planned with Out & About by Putri:\n" + l.map(function (x) { var p = planOf(x.key); return (p.time ? fmtTime(p.time) + " " : "") + x.n + (bookingOn(x.key, S.dayDate) ? " ✅" : ""); }).join("\n") + "\nRoute:", dayRouteUrl(l, daySpots(l))); return; }
     if (d.share) { var x0 = current().x; if (x0) shareLink(x0.n, x0.n + " (" + x0.d + "), recommended by Putri on Out & About", location.href); return; }
     if (d.lunch) { S.food.lunch = !S.food.lunch; render(true); return; }
     if (d.spinloc) { S[current().module].spinLoc = d.spinloc; render(true); return; }
@@ -1202,6 +1218,7 @@
     if (d.closesheet) { closeSheet(); return; }
     if (d.book) { openSheet("book", d.book); return; }
     if (d.bookedit) { openSheet("details", d.bookedit); return; }
+    if (d.editbk) { var eb = bookingById(d.editbk); if (eb) openSheet("details", eb.key, { id: eb.id }); return; }
     if (d.settime) { openSheet("time", d.settime); return; }
     if (d.party) { var pe = document.getElementById("b-party"); if (pe) { var nv = Math.max(1, Math.min(20, +pe.textContent + +d.party)); pe.textContent = nv; updateWa(); } return; }
     if (d.bookvia) {
@@ -1216,12 +1233,16 @@
     if (d.didyes) { openSheet("details", S.modal.key, { b: S.pending && S.pending.b }); S.pending = null; return; }
     if (d.savebooking) {
       var sx = find(S.modal.key), w = readWhen(), amt = document.getElementById("b-amt").value.replace(/[^\d.]/g, "");
-      S.plan[sx.key] = { booked: true, date: w.date, time: w.time, party: w.party, ref: document.getElementById("b-ref").value.trim(), deposit: document.getElementById("b-dep").checked || !!amt, amount: amt, notes: document.getElementById("b-notes").value.trim(), via: S.pending ? S.pending.via : "" };
-      S.party = w.party; save("oa-party", w.party); savePlan();
-      if (!inDay(sx.key) && S.myday.length < 8) { S.myday.push(sx.key); saveDay(); }
-      S.pending = null; closeSheet(); toast("Booking saved in My day ✓"); render(true); return;
+      var ref = document.getElementById("b-ref").value.trim(), dep = document.getElementById("b-dep").checked || !!amt, notes = document.getElementById("b-notes").value.trim();
+      var eid = S.modal.extra.id, bk = eid && bookingById(eid);
+      if (bk) { bk.date = w.date; bk.time = w.time; bk.party = w.party; bk.ref = ref; bk.deposit = dep; bk.amount = amt; bk.notes = notes; }
+      else S.bookings.push({ id: "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), key: sx.key, date: w.date, time: w.time, party: w.party, ref: ref, deposit: dep, amount: amt, notes: notes, via: S.pending ? S.pending.via : "" });
+      saveBookings();
+      if (w.date === S.dayDate) { S.plan[sx.key] = S.plan[sx.key] || {}; S.plan[sx.key].time = w.time; savePlan(); if (!inDay(sx.key) && S.myday.length < 8) { S.myday.push(sx.key); saveDay(); } }
+      S.party = w.party; save("oa-party", w.party);
+      S.pending = null; closeSheet(); toast(w.date === S.dayDate ? "Booking saved in My day ✓" : "Booking saved for " + fmtDate(w.date) + " ✓"); render(true); return;
     }
-    if (d.unbook) { var ux = S.modal.key, keep = S.plan[ux] && S.plan[ux].time; S.plan[ux] = keep ? { time: keep } : undefined; savePlan(); closeSheet(); toast("Booking removed"); render(true); return; }
+    if (d.unbook) { var uid = S.modal.extra.id; S.bookings = S.bookings.filter(function (b) { return b.id !== uid; }); saveBookings(); closeSheet(); toast("Booking removed"); render(true); return; }
     if (d.savetime) { var tk = S.modal.key, tv = document.getElementById("b-time").value; S.plan[tk] = S.plan[tk] || {}; S.plan[tk].time = tv; savePlan(); closeSheet(); render(true); return; }
     if (d.cleartime) { var ck = S.modal.key; if (S.plan[ck]) { delete S.plan[ck].time; savePlan(); } closeSheet(); render(true); return; }
     if (d.sorttime) {
@@ -1234,7 +1255,7 @@
       a2.href = URL.createObjectURL(blob); a2.download = "my-day-" + S.dayDate + ".ics"; document.body.appendChild(a2); a2.click(); setTimeout(function () { URL.revokeObjectURL(a2.href); a2.remove(); }, 1000);
       toast("Calendar file ready: open it to add your day"); return;
     }
-    if (d.clearpast) { var td = todayISO(); Object.keys(S.plan).forEach(function (k) { var p = S.plan[k]; if (p && p.booked && (p.date || td) < td) delete S.plan[k]; }); savePlan(); render(true); return; }
+    if (d.clearpast) { var td = todayISO(); S.bookings = S.bookings.filter(function (b) { return (b.date || td) >= td; }); saveBookings(); render(true); return; }
     if (d.bookday) { d.bookday.split(",").forEach(function (k) { if (!inDay(k) && S.myday.length < 8) S.myday.push(k); }); saveDay(); location.hash = "#book"; return; }
     if (d.notekind) { S.noteKind = d.notekind; render(true); return; }
     if (d.morebranches) { app.querySelectorAll(".more-branch").forEach(function (li) { li.hidden = false; }); t.remove(); return; }
@@ -1311,7 +1332,7 @@
     loadTab(CFG.branchesCsvUrl, "data/branches.csv")
   ]).then(function (res) {
     buildData(res[0], res[1], res[2], res[3], res[4]);
-    if (CFG.demoSeed && !S.myday.length) { S.myday = CFG.demoSeed.myday.filter(function (k) { return BYKEY[k]; }); S.plan = JSON.parse(JSON.stringify(CFG.demoSeed.plan)); }
+    if (CFG.demoSeed && !S.myday.length) { S.myday = CFG.demoSeed.myday.filter(function (k) { return BYKEY[k]; }); S.plan = JSON.parse(JSON.stringify(CFG.demoSeed.plan)); S.bookings = JSON.parse(JSON.stringify(CFG.demoSeed.bookings || [])); }
     var before = S.myday.length;
     S.myday = S.myday.filter(function (k) { return BYKEY[k]; });
     if (S.myday.length !== before) { saveDay(); setTimeout(function () { toast("A place in My day has closed, so it was removed."); }, 400); }
