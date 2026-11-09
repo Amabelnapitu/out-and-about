@@ -530,6 +530,7 @@
       '<a class="mod bar" href="#bar">' + coupe("") + "<span><b>Pour Decisions</b><small>Putri’s bars &amp; clubs · " + RATED_BARS.length + ' reviewed</small></span><span class="go" aria-hidden="true">→</span></a>' +
       '<a class="mod day" href="#sip"><span class="pair">' + cup("") + dumpling("") + coupe("") + '</span><span><b>Sip &amp; Bite</b><small>Coffee, food and drinks: plan your outing</small></span><span class="go" aria-hidden="true">→</span></a>' +
       '<div class="mini-row"><a class="mini md-tile" href="#myday"><b>📋 My day</b><small>' + plural(S.myday.length, "stop") + ' planned</small></a><a class="mini" href="#near"><b>📍 Near me</b><small>Closest good places</small></a></div>' +
+      (function () { var c = bookingCounts(); return c.up || c.todo ? '<a class="banner book-banner" href="#bookings"><span aria-hidden="true" style="font-size:24px">📅</span><span><b>My bookings</b><small>' + [c.up ? c.up + " upcoming" : "", c.todo ? c.todo + " still to book" : ""].filter(String).join(" · ") + '</small></span><span aria-hidden="true">→</span></a>' : ""; })() +
       '<a class="banner" href="#putri"><span aria-hidden="true" style="font-size:24px">🌷</span><span><b>Putri’s page</b><small>' + plural(ALL.length, "place") + " tried across " + districtsOf(ALL).length + " districts</small></span></a>" +
       '<a class="banner" href="#note"><span aria-hidden="true" style="font-size:24px">💌</span><span><b>Send Putri a note</b><small>Suggest a place, report one that’s closed, or say hi</small></span></a></div>';
   };
@@ -948,7 +949,38 @@
             : '<div class="chips"><button class="pill solid" data-book="' + esc(x.key) + '">Book now</button><button class="pill" data-bookedit="' + esc(x.key) + '">Already booked</button></div>') + "</article>";
       }).join("") +
       (need && done === need ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">🎉</span><span><b>All booked!</b><small>Everything is saved in My day.</small></span></div>' : "") +
-      '<a class="cta cta-main" href="#myday">Done</a></div>';
+      '<a class="cta cta-main" href="#myday">Done</a><a class="small-link" href="#bookings" style="justify-self:center">See all my bookings</a></div>';
+  };
+
+  // Every booking in one place: upcoming (by date), still to book, and past.
+  function allBookings() {
+    return Object.keys(S.plan).filter(function (k) { return S.plan[k] && S.plan[k].booked && find(k); }).map(function (k) { return { x: find(k), p: S.plan[k] }; })
+      .sort(function (a, b) { var A = (a.p.date || "") + (a.p.time || ""), B = (b.p.date || "") + (b.p.time || ""); return A < B ? -1 : A > B ? 1 : 0; });
+  }
+  function bookingCounts() {
+    var today = todayISO(), up = allBookings().filter(function (o) { return (o.p.date || today) >= today; }).length;
+    var todo = S.myday.map(find).filter(Boolean).filter(function (x) { return bookStatus(x) === "tobook"; }).length;
+    return { up: up, todo: todo };
+  }
+  V.bookings = function () {
+    var today = todayISO(), all = allBookings();
+    var up = all.filter(function (o) { return (o.p.date || today) >= today; }), past = all.filter(function (o) { return (o.p.date || today) < today; }).reverse();
+    var todo = S.myday.map(find).filter(Boolean).filter(function (x) { return bookStatus(x) === "tobook"; });
+    function row(o) {
+      var p = o.p, x = o.x;
+      return '<li class="bk-item"><span class="bk-time">' + esc(fmtTime(p.time) || "–") + '</span><span style="min-width:0"><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc([x.d, p.party ? p.party + " people" : "", p.ref ? "ref " + p.ref : "", p.deposit ? "deposit" + (p.amount ? " HK$" + p.amount : "") + " paid" : ""].filter(String).join(" · ")) + "</small>" + (p.notes ? "<small>📝 " + esc(p.notes) + "</small>" : "") + '</span><button class="pill" data-bookedit="' + esc(x.key) + '">Edit</button></li>';
+    }
+    var byDate = {}, dates = [];
+    up.forEach(function (o) { var d = o.p.date || today; if (!byDate[d]) { byDate[d] = []; dates.push(d); } byDate[d].push(o); });
+    return '<div class="pad"><div class="myday-head"><span class="md-ico" aria-hidden="true">📅</span><div><h1 class="app-title">My bookings</h1><p class="sub">Everything you’ve booked, and what’s left to book. Kept on this phone.</p></div></div>' +
+      '<span class="label">Still to book (' + todo.length + ")</span>" +
+      (todo.length ? '<ul class="list">' + todo.map(function (x) { var p = planOf(x.key); return '<li><div class="row"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(fmtDate(S.dayDate) + (p.time ? " · " + fmtTime(p.time) : "") + " · from My day") + '</small></span><button class="pill solid" data-book="' + esc(x.key) + '">Book</button></div></li>'; }).join("") + "</ul>"
+        : '<p class="sub" style="margin-top:-6px">Nothing waiting. Stops in My day that need booking show up here.</p>') +
+      '<span class="label">Upcoming (' + up.length + ")</span>" +
+      (dates.length ? dates.map(function (d) { return '<div class="bk-day"><h2>' + esc(d === today ? "Today · " + fmtDate(d) : fmtDate(d)) + '</h2><ul class="bk-list">' + byDate[d].map(row).join("") + "</ul></div>"; }).join("")
+        : '<div class="empty">No bookings yet. Book a place from its page, or use <b>Book this day</b> in My day.</div>') +
+      (past.length ? '<details class="bk-past"><summary>Past bookings (' + past.length + ')</summary><ul class="bk-list">' + past.map(function (o) { return row(o).replace('<span class="bk-time">', '<span class="bk-time">' + esc(fmtDate(o.p.date)) + "<br>"); }).join("") + '</ul><button class="small-link" data-clearpast="1">Clear past bookings</button></details>' : "") +
+      '<div class="chips"><a class="pill" href="#myday">📋 My day</a>' + (S.myday.length ? '<a class="pill" href="#book">📅 Book this day</a>' : "") + "</div></div>";
   };
 
   // Calendar file for the whole day
@@ -1009,6 +1041,7 @@
     return '<div class="pad"><div class="myday-head"><span class="md-ico" aria-hidden="true">📋</span><div><h1 class="app-title">My day</h1><p class="sub">One list for all of Out &amp; About, kept on this phone.</p></div></div>' +
       '<div class="md-strip" aria-hidden="true"><span>☕ Bean There</span><span>🍽️ Seconds, Please</span><span>🍸 Pour Decisions</span><span>✨ Sip &amp; Bite</span></div>' +
       (list.length ? '<div class="day-date"><label for="day-date">📅 Plan for</label><input id="day-date" type="date" value="' + esc(S.dayDate) + '"><span class="meta">' + esc(fmtDate(S.dayDate)) + "</span></div>" +
+        '<a class="small-link" href="#bookings" style="justify-self:end">📅 All my bookings →</a>' +
         (need ? '<a class="banner book-banner" href="#book"><span aria-hidden="true" style="font-size:24px">' + (done === need ? "🎉" : "📅") + "</span><span><b>" + (done === need ? "All booked" : "Book this day") + "</b><small>" + done + " of " + need + " booked" + (list.length - need ? " · " + (list.length - need) + " walk-in" : "") + '</small></span><span aria-hidden="true">→</span></a>' : "") : "") +
       (list.length ? '<ol class="day-list">' + list.map(function (x, j) {
         return (j ? '<li class="day-gap" aria-hidden="true">🚶 ' + walk(kmPts(spots[j - 1].ll, spots[j].ll)) + "</li>" : "") +
@@ -1040,16 +1073,16 @@
   };
 
   // ---------- Router ----------
-  var MODULE_OF = { home: "hub", near: "hub", putri: "hub", myday: "hub", note: "hub", book: "hub" };
+  var MODULE_OF = { home: "hub", near: "hub", putri: "hub", myday: "hub", note: "hub", book: "hub", bookings: "hub" };
   var THEME = { hub: "hub", bean: "bean", food: "food", bar: "bar", sip: "day" };
   var NAVS = {
-    hub: [["", "🏠", "Home"], ["near", "📍", "Near me"], ["putri", "🌷", "Putri"], ["myday", "📋", "My day"]],
+    hub: [["", "🏠", "Home"], ["near", "📍", "Near me"], ["bookings", "📅", "Bookings"], ["myday", "📋", "My day"]],
     bean: [["", "⌂", "Home"], ["bean", "☕", "Bean There"], ["bean/map", "🗺️", "Map"], ["myday", "📋", "My day"]],
     food: [["", "⌂", "Home"], ["food/map", "🗺️", "Map"], ["food/results", "😋", "Craving"], ["food/spin", "🥢", "Spin"], ["myday", "📋", "My day"]],
     bar: [["", "⌂", "Home"], ["bar/hotspots", "📍", "Hotspots"], ["bar/results", "🍸", "Vibe"], ["bar/spin", "🍾", "Spin"], ["myday", "📋", "My day"]],
     sip: [["", "⌂", "Home"], ["sip/suggest", "✨", "Plans"], ["sip/days", "🗓️", "Days"], ["sip/map", "🗺️", "Map"], ["myday", "📋", "My day"]]
   };
-  var TITLES = { "": "Out & About by Putri", bean: "Bean There", "bean/map": "Café map", food: "Seconds, Please", "food/quiz": "Craving Match", "food/results": "Your matches", "food/map": "Restaurant map", "food/lunch": "Lunch Set Finder", "food/spin": "Spin the Chopsticks", bar: "Pour Decisions", "bar/quiz": "Vibe Match", "bar/results": "Your matches", "bar/hotspots": "Hotspots", "bar/spin": "Spin the Bottle", sip: "Sip & Bite", "sip/plans": "Plans", "sip/suggest": "Putri suggests", "sip/days": "Ready-made days", "sip/map": "One map", near: "Near me", putri: "Putri’s page", myday: "My day", note: "Send Putri a note", book: "Book this day" };
+  var TITLES = { "": "Out & About by Putri", bean: "Bean There", "bean/map": "Café map", food: "Seconds, Please", "food/quiz": "Craving Match", "food/results": "Your matches", "food/map": "Restaurant map", "food/lunch": "Lunch Set Finder", "food/spin": "Spin the Chopsticks", bar: "Pour Decisions", "bar/quiz": "Vibe Match", "bar/results": "Your matches", "bar/hotspots": "Hotspots", "bar/spin": "Spin the Bottle", sip: "Sip & Bite", "sip/plans": "Plans", "sip/suggest": "Putri suggests", "sip/days": "Ready-made days", "sip/map": "One map", near: "Near me", putri: "Putri’s page", myday: "My day", note: "Send Putri a note", book: "Book this day", bookings: "My bookings" };
   var lastModule = "hub";
 
   function current() {
@@ -1075,7 +1108,7 @@
     if (key !== lastKey) keep = false;
     lastKey = key;
     if (r.module !== "hub" || r.name === "home") lastModule = r.module;
-    var theme = r.name === "myday" || r.name === "book" ? "hub" : THEME[r.module] || "hub";
+    var theme = r.name === "myday" || r.name === "book" || r.name === "bookings" ? "hub" : THEME[r.module] || "hub";
     document.body.className = "theme-" + theme;
     app.innerHTML = html;
     var bare = ["bean", "food", "bar", "sip", "food/quiz", "bar/quiz", "sip/plans"].indexOf(r.name) !== -1;
@@ -1201,6 +1234,7 @@
       a2.href = URL.createObjectURL(blob); a2.download = "my-day-" + S.dayDate + ".ics"; document.body.appendChild(a2); a2.click(); setTimeout(function () { URL.revokeObjectURL(a2.href); a2.remove(); }, 1000);
       toast("Calendar file ready: open it to add your day"); return;
     }
+    if (d.clearpast) { var td = todayISO(); Object.keys(S.plan).forEach(function (k) { var p = S.plan[k]; if (p && p.booked && (p.date || td) < td) delete S.plan[k]; }); savePlan(); render(true); return; }
     if (d.bookday) { d.bookday.split(",").forEach(function (k) { if (!inDay(k) && S.myday.length < 8) S.myday.push(k); }); saveDay(); location.hash = "#book"; return; }
     if (d.notekind) { S.noteKind = d.notekind; render(true); return; }
     if (d.morebranches) { app.querySelectorAll(".more-branch").forEach(function (li) { li.hidden = false; }); t.remove(); return; }

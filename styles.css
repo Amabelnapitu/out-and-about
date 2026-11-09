@@ -386,3 +386,14 @@ body.modal-open { overflow: hidden; }
 .book-row small { color: var(--muted); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .st-todo, :root:not([data-theme="light"]) .badge-todo { background: #4A3417; color: #F5C98A; } }
 @media (prefers-reduced-motion: reduce) { .modal-panel { animation: none; } .progress i { transition: none; } }
+.bk-day { display: grid; gap: 8px; }
+.bk-day h2 { font-family: var(--f-hand); font-size: 17px; letter-spacing: .05em; color: var(--muted); }
+.bk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.bk-item { display: grid; grid-template-columns: 58px minmax(0,1fr) auto; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: 14px; padding: 10px 12px; }
+.bk-item .nm { font-weight: 700; color: inherit; }
+.bk-item small { display: block; color: var(--muted); font-size: 12px; }
+.bk-time { font-family: var(--f-display); font-size: 17px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.bk-past { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.bk-past summary { cursor: pointer; font-weight: 700; }
+.bk-past .bk-list { margin-top: 10px; }
+.bk-past .bk-item { border-left-color: var(--line); opacity: .8; }
