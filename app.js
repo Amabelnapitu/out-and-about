@@ -1196,6 +1196,7 @@
       saveDay(); toast("Sorted by time ✓"); render(true); return;
     }
     if (d.ics) {
+      if (CFG.demoBooking) { toast("In the real app this saves a calendar file with every stop"); return; }
       var il = S.myday.map(find).filter(Boolean), blob = new Blob([icsFor(il)], { type: "text/calendar" }), a2 = document.createElement("a");
       a2.href = URL.createObjectURL(blob); a2.download = "my-day-" + S.dayDate + ".ics"; document.body.appendChild(a2); a2.click(); setTimeout(function () { URL.revokeObjectURL(a2.href); a2.remove(); }, 1000);
       toast("Calendar file ready: open it to add your day"); return;
