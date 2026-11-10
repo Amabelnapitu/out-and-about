@@ -1,5 +1,5 @@
 // Out & About offline support: keeps the app and the latest lists on the phone.
-var CACHE = "out-and-about-v4";
+var CACHE = "out-and-about-v5";
 var SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "data/cafes.csv", "data/food.csv", "data/bars.csv", "data/branches.csv", "data/desserts.csv", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", function (e) {

@@ -67,9 +67,11 @@
   var SWEET_RE = /cake|waffle|croissant|mochi|pancake|cookie|dessert|parfait|kakigori|pastr|muffin|tiramisu|gelato|ice cream/i;
   var BRUNCH_RE = /egg|toast|bagel|pancake|sando|croissant|benedict|waffle|muffin|taco rice|sandwich|brunch/i;
 
+  function parseDate(v) { if (!v) return null; var d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + "T00:00" : v); return isNaN(d) ? null : d; }
+  function isNew(x) { return x.added && Date.now() - x.added.getTime() < 31 * 864e5 && x.added.getTime() <= Date.now() + 864e5; }
   function base(o, type) {
     return { type: type, d: o.district, n: o.name, rk: num(o.rank), rt: num(o.rating), o: o.mustorder || "", p: o.price || "", pp: firstNum(o.price),
-      no: o.note || "", tags: tagsOf(o.tags), maps: o.mapslink || "", ll: coords(o.latlng) };
+      no: o.note || "", tags: tagsOf(o.tags), maps: o.mapslink || "", ll: coords(o.latlng), added: parseDate(o.added) };
   }
   function keyOf(x) { return x.type + "/" + slug(x.d) + "/" + slug(x.n); }
   // Branches from the BRANCHES tab (filled in by the monthly check): every open branch of each place, by kind + name.
@@ -92,7 +94,7 @@
     });
   }
   function buildData(c, f, b, s, br) {
-    CAFES = c.map(function (o) { var x = base(o, "cafe"); x.k = o.drink || ""; return x; }).filter(isOpen);
+    CAFES = c.map(function (o) { var x = base(o, "cafe"); x.k = o.drink || ""; x.taste = tagsOf(o.taste); return x; }).filter(isOpen);
     FOOD = f.map(function (o) { var x = base(o, "food"); x.c = o.cuisine || ""; x.dessert = o.dessert || ""; return x; }).filter(isOpen);
     BARS = b.map(function (o) { var x = base(o, "bar"); x.kind = /both/i.test(o.type) ? "Both" : /club/i.test(o.type) ? "Club" : "Bar"; x.c = x.kind === "Both" ? "Bar → club" : x.kind; x.area = o.area || ""; return x; }).filter(isOpen);
     RATED_BARS = BARS.filter(function (x) { return x.rt != null; });
@@ -238,7 +240,8 @@
     myday: load("oa-myday", []), mq: "",
     food: { profile: load("oa-food-profile", null), pin: "Central", query: "", budget: 450, lunch: false, spinLoc: "any", spinAngle: 0, tagline: 0 },
     bar: { profile: load("oa-bar-profile", null), pin: "Central", budget: 200, kind: "all", spinLoc: "any", spinAngle: 0, tagline: 0 },
-    bean: { pin: "Sheung Wan" },
+    bean: { pin: "Sheung Wan", profile: load("oa-bean-profile", null) },
+    saved: load("oa-saved", []), hq: "", recent: [], shared: null,
     day: { profile: load("oa-day-profile", null), pswaps: {}, area: "Central", plan: "weekend", swaps: {}, layer: "both", pin: "Central", tagline: 0 },
     near: { at: null, label: "", district: "Central", type: "both", locating: false },
     quiz: null, cooking: null,
@@ -348,7 +351,45 @@
     if (p.crew === "big" && t("small-space")) { adj -= 6; why.push(["minus", "🤏 Small space"]); }
     return { score: Math.max(5, Math.min(99, Math.round(b.rt / 5 * 60 + adj))), why: why.slice(0, 3) };
   }
+  QUIZZES.cafe = [
+    { key: "milk", q: "How do you take your coffee?", sub: "No judgement. Ok, a little judgement.", opts: [["strong", "Strong & punchy", "Wake me up, emotionally and physically", "⚡"], ["balanced", "Balanced", "Like my life (aspirationally)", "🕊️"], ["milky", "Creamy & milky", "Basically a warm hug in a cup", "☁️"]] },
+    { key: "beans", q: "Pick a flavour vibe", sub: "What should the beans taste like?", opts: [["nutty", "Nutty & chocolatey", "Dessert, but make it caffeine", "🍫"], ["fruity", "Fruity & bright", "Fancy notes of berries, apparently", "🍓"], ["any", "I just want caffeine", "No thoughts, only beans", "⚡"]] },
+    { key: "drink", q: "What’s your usual order?", sub: "The one you say without looking at the menu.", tiles: true, opts: [["Espresso Tonic", "Espresso tonic", "Fizzy coffee gang", "🫧"], ["Flat White", "Flat white", "The classic", "☕"], ["Latte", "Latte", "Big and cosy", "🥛"], ["Matcha", "Matcha", "Coffee who?", "🍵"], ["Americano", "Americano", "Black, like my humour", "🖤"]] },
+    { key: "budget", q: "Wallet status?", sub: "Hong Kong coffee prices are a sport.", tiles: true, opts: [["save", "Saving", "Good coffee, kind price", "🪙"], ["treat", "Treating myself", "Price is a feeling", "💅"]] }
+  ];
+  function taste(c, p) {
+    var base = (c.rt == null ? 3.5 : c.rt) / 5 * 60, adj = 6, why = [];
+    function has(t) { return c.taste.indexOf(t) !== -1 || c.tags.indexOf(t) !== -1; }
+    var lowish = c.rt != null && c.rt < 4.2;
+    if (p.milk === "milky") {
+      if (has("milky")) { adj += 12; why.push(["plus", "🥛 Creamy, your thing"]); if (lowish) { adj += Math.round((4.5 - c.rt) * 8); why.push(["plus", "Putri: “too milky”. You: yes please"]); } }
+      if (has("strong")) { adj -= 6; why.push(["minus", "💪 Might be too strong"]); }
+      if (has("weak")) { adj -= 6; why.push(["minus", "💧 Even milk fans say: weak"]); }
+    } else if (p.milk === "strong") {
+      if (has("strong")) { adj += 10; why.push(["plus", "💪 Strong, like you asked"]); }
+      if (has("roasty")) { adj += 3; if (lowish) { adj += 6; why.push(["plus", "Too roasty for Putri, maybe not for you"]); } }
+      if (has("milky")) { adj -= 8; why.push(["minus", "🥛 On the milky side"]); }
+      if (has("weak")) { adj -= 8; why.push(["minus", "💧 Weak for you"]); }
+    } else {
+      if (has("smooth")) { adj += 7; why.push(["plus", "🫧 Smooth & balanced"]); }
+      if (has("milky")) adj -= 3;
+      if (has("weak")) { adj -= 5; why.push(["minus", "💧 A bit weak"]); }
+    }
+    if (p.beans === "nutty") {
+      if (has("nutty") || has("chocolatey")) { adj += 9; why.push(["plus", "🌰 Nutty beans"]); if (lowish) { adj += 8; why.push(["plus", "Putri’s not into nutty. You are"]); } }
+      if (has("fruity")) { adj -= 5; why.push(["minus", "🍓 Fruity beans"]); }
+    } else if (p.beans === "fruity") {
+      if (has("fruity")) { adj += 9; why.push(["plus", "🍓 Fruity beans"]); if (lowish) { adj += 6; why.push(["plus", "Putri regretted the fruity beans. You won’t"]); } }
+      if (has("nutty")) { adj -= 5; why.push(["minus", "🌰 Nutty beans"]); }
+    }
+    if (p.drink && c.k === p.drink) { adj += 12; why.push(["plus", "☕ Your usual: " + p.drink]); }
+    if (p.budget === "save") { if (has("cheap")) { adj += 6; why.push(["plus", "💸 Easy on the wallet"]); } if (has("pricey")) { adj -= 6; why.push(["minus", "💎 Pricey"]); } }
+    else if (p.budget === "treat" && has("pricey")) adj += 2;
+    if (has("small-portion")) adj -= 2;
+    return { score: Math.max(5, Math.min(99, Math.round(base + adj))), why: why.slice(0, 3) };
+  }
   var PERSONA = {
+    cafe: function (p) { return [{ strong: "⚡", balanced: "🕊️", milky: "☁️" }[p.milk], "The " + { nutty: "Chocolatey", fruity: "Fruity", any: "Chaotic" }[p.beans] + " " + { strong: "Espresso Gremlin", balanced: "Flat White Diplomat", milky: "Latte Cloud" }[p.milk]]; },
     food: function (p) { return { asian: ["🍜", "The Noodle Nomad"], pizza: ["🍕", "The Carb Connoisseur"], spicy: ["🌶️", "The Chilli Champion"], western: ["🍔", "The Comfort Classicist"], fresh: ["🥗", "The Fresh Fanatic"], any: ["🎲", "The Adventurous Eater"] }[p.mood]; },
     bar: function (p) { return { chill: ["🍸", "The Cocktail Connoisseur"], dance: ["🪩", "Dance Floor Royalty"], both: ["🌙", "The Night Shapeshifter"], any: ["🎲", "The Wild Card"] }[p.vibe]; }
   };
@@ -504,10 +545,11 @@
     body.device = device;
     return fetch(API, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) }).then(function (r) { return r.json(); });
   }
+  function ago(ms) { var m = Math.max(1, Math.round((Date.now() - ms) / 6e4)); return m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d"; }
   function refreshVotes() {
     if (!API) return;
     fetch(API + (API.indexOf("?") === -1 ? "?" : "&") + "action=summary").then(function (r) { return r.json(); })
-      .then(function (s) { if (s && s.ok) { S.votes = s.votes || {}; if (current().name === "place") render(true); } }).catch(function () {});
+      .then(function (s) { if (s && s.ok) { S.votes = s.votes || {}; S.recent = s.recent || []; if (current().name === "place" || current().name === "putri") render(true); } }).catch(function () {});
   }
   function voteBlock(x) {
     if (x.rt == null) return "";
@@ -523,22 +565,63 @@
 
   V.home = function () {
     return '<div class="hub"><div class="hub-head"><div class="duo">' + cup("") + dumpling("") + coupe("") + '</div><h1 class="l-title">Out &amp; About</h1><span class="stamp">by Putri</span><p class="hello">' + hello() + "</p></div>" +
+      '<label class="search"><span aria-hidden="true">🔎</span><input id="hq" type="search" placeholder="Search any café, restaurant, bar or dessert…" value="' + esc(S.hq) + '" autocomplete="off" aria-label="Search every place"></label>' +
+      (S.hq.trim() ? searchResults() : homeBody()) + "</div>";
+  };
+  function searchResults() {
+    var qq = S.hq.trim().toLowerCase();
+    var hits = FOOD.concat(CAFES, BARS, DESSERTS).filter(function (x) { return [x.n, x.d, x.c || "", x.k || "", x.o, x.tags.join(" ")].join(" ").toLowerCase().indexOf(qq) !== -1; })
+      .sort(function (a, b) { return (a.n.toLowerCase().indexOf(qq) === 0 ? 0 : 1) - (b.n.toLowerCase().indexOf(qq) === 0 ? 0 : 1) || (b.rt || 0) - (a.rt || 0); });
+    return '<p class="meta" style="margin:0">' + plural(hits.length, "place") + " for “" + esc(S.hq.trim()) + "”</p>" +
+      (hits.length ? '<ul class="list">' + hits.slice(0, 30).map(function (x) { return '<li><a class="row" href="' + href(x) + '"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(x.d + (x.c && x.type !== "dessert" ? " · " + x.c : "") + (x.o ? " · " + x.o : "")) + '</small></span><span class="score">' + (x.rt != null ? "★ " + x.rt : "") + "</span></a></li>"; }).join("") + "</ul>"
+        : '<div class="empty">Nothing found. Try a dish, a cuisine or a district, or <a href="#note">suggest a place to Putri</a>.</div>');
+  }
+  function installTip() {
+    var standalone = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone;
+    var ua = navigator.userAgent || "", ios = /iPhone|iPad|iPod/.test(ua), android = /Android/.test(ua);
+    if (standalone || (!ios && !android) || load("oa-tip-install", false)) return "";
+    return '<div class="tip"><b>📲 Keep Out &amp; About on your home screen</b><small>' + (ios ? "Tap the Share button (the square with an arrow), then “Add to Home Screen”." : "Tap ⋮ in the top corner, then “Install app” or “Add to Home screen”.") + '</small><button class="tip-x" data-dismiss="oa-tip-install" aria-label="Dismiss">✕</button></div>';
+  }
+  function homeBody() {
+    var fresh = ALL.concat(BARS.filter(function (b) { return b.rt == null; })).filter(isNew).sort(function (a, b) { return b.added - a.added; });
+    return (load("oa-tip-welcome", false) ? "" : '<div class="tip"><b>👋 New here?</b><small>These are Putri’s honest picks around Hong Kong. Not sure where to start? Let her plan it.</small><a class="pill solid" href="#sip/plans" style="justify-self:start">Plan my outing ✨</a><button class="tip-x" data-dismiss="oa-tip-welcome" aria-label="Dismiss">✕</button></div>') +
       '<a class="mod bean" href="#bean">' + cup("") + "<span><b>Bean There</b><small>Putri’s café picks · " + plural(CAFES.length, "café") + '</small></span><span class="go" aria-hidden="true">→</span></a>' +
       '<a class="mod food" href="#food">' + dumpling("") + "<span><b>Seconds, Please</b><small>Putri’s restaurant picks · " + plural(FOOD.length, "place") + '</small></span><span class="go" aria-hidden="true">→</span></a>' +
       '<a class="mod bar" href="#bar">' + coupe("") + "<span><b>Pour Decisions</b><small>Putri’s bars &amp; clubs · " + RATED_BARS.length + ' reviewed</small></span><span class="go" aria-hidden="true">→</span></a>' +
       '<a class="mod day" href="#sip"><span class="pair">' + cup("") + dumpling("") + coupe("") + '</span><span><b>Sip &amp; Bite</b><small>Coffee, food and drinks: plan your outing</small></span><span class="go" aria-hidden="true">→</span></a>' +
-      '<div class="mini-row"><a class="mini md-tile" href="#myday"><b>📋 My day</b><small>' + plural(S.myday.length, "stop") + ' planned</small></a><a class="mini" href="#near"><b>📍 Near me</b><small>Closest good places</small></a></div>' +
+      '<div class="mini-row"><a class="mini md-tile" href="#myday"><b>📋 My day</b><small>' + plural(S.myday.length, "stop") + ' planned</small></a><a class="mini" href="#near"><b>📍 Near me</b><small>Closest good places</small></a>' +
+      '<a class="mini" href="#saved"><b>♡ Saved</b><small>' + plural(S.saved.filter(find).length, "place") + '</small></a><a class="mini" href="#sweet"><b>🍰 Sweet tooth</b><small>' + plural(DESSERTS.length, "dessert spot") + "</small></a></div>" +
+      (fresh.length ? '<span class="label">🆕 New this month</span><div class="chips">' + fresh.slice(0, 8).map(function (x) { return '<a class="pill" href="' + href(x) + '">' + icon(x) + " " + esc(x.n) + "</a>"; }).join("") + "</div>" : "") +
       '<a class="banner" href="#putri"><span aria-hidden="true" style="font-size:24px">🌷</span><span><b>Putri’s page</b><small>' + plural(ALL.length, "place") + " tried across " + districtsOf(ALL).length + " districts</small></span></a>" +
-      '<a class="banner" href="#note"><span aria-hidden="true" style="font-size:24px">💌</span><span><b>Send Putri a note</b><small>Suggest a place, report one that’s closed, or say hi</small></span></a></div>';
-  };
+      '<a class="banner" href="#note"><span aria-hidden="true" style="font-size:24px">💌</span><span><b>Send Putri a note</b><small>Suggest a place, report one that’s closed, or say hi</small></span></a>' + installTip();
+  }
 
   // Bean There lives on as its own site; here you get its map and café pages, plus links to the rest.
   V.bean = function () {
     return '<div class="landing">' + DOODLE + floaties([["8%", "12%", 0, "☕"], ["84%", "9%", 1.2, "🌷"], ["10%", "78%", 2.1, "🌷"], ["86%", "70%", .6, "☕"]]) +
       '<div class="bubble">Putri’s honest coffee picks around Hong Kong.</div>' + cup("mascot") +
       '<div><h1 class="l-title" style="font-size:58px">Bean<br>There</h1><span class="stamp">by Putri</span></div>' +
-      '<a class="cta cta-main" href="' + BEAN_THERE + '#match" target="_blank" rel="noopener">Find my perfect cup ☕</a><a class="cta cta-ghost" href="#bean/map">Explore the café map</a>' +
-      '<p class="l-stats"><a href="' + BEAN_THERE + '#putri" target="_blank" rel="noopener">Putri’s Palate</a> · <a href="' + BEAN_THERE + '#crawl" target="_blank" rel="noopener">Coffee crawl</a> · ' + plural(CAFES.length, "café") + "</p></div>";
+      '<a class="cta cta-main" href="#bean/quiz">Find my perfect cup ☕</a><a class="cta cta-ghost" href="#bean/map">Explore the café map</a>' +
+      '<p class="l-stats">' + plural(CAFES.length, "café") + " · " + districtsOf(CAFES).length + " districts · " + CAFES.filter(function (c) { return c.rt === 5; }).length + " perfect 5s</p></div>";
+  };
+  function brewView() {
+    return '<div class="cook" style="background:linear-gradient(170deg, var(--lilac-soft), var(--lilac-bg))">' + cup("mascot") + '<h1>Brewing for you</h1><p><span id="cookline">Tasting ' + CAFES.length + " cafés</span>…</p></div>";
+  }
+  V["bean/quiz"] = function () { if (S.cooking === "cafe") return brewView(); startQuiz("cafe"); return quizView("cafe"); };
+  function cafeCard(c, i, m) {
+    return '<article class="card"><div class="card-head"><span class="rank' + (i < 3 ? " r" + (i + 1) : "") + '">' + (i + 1) + "</span>" +
+      '<div><h3><a href="' + href(c) + '" style="text-decoration:none">' + esc(c.n) + '</a></h3><span class="meta">' + esc(c.d) + " · Putri ★ " + c.rt + (price(c) ? " · " + esc(price(c)) : "") + '</span></div><span class="match">' + m.score + "%</span></div>" +
+      (c.o ? '<p class="order">Get: <b>' + esc(c.o) + "</b></p>" : "") + (c.no ? '<p class="note">“' + esc(c.no) + "”</p>" : "") +
+      (m.why.length ? '<div class="chips">' + m.why.map(function (w) { return '<span class="chip ' + w[0] + '">' + esc(w[1]) + "</span>"; }).join("") + "</div>" : "") +
+      '<div class="chips">' + addBtn(c) + "</div></article>";
+  }
+  V["bean/results"] = function () {
+    var p = S.bean.profile; if (!p) return null;
+    var per = PERSONA.cafe(p), ranked = CAFES.filter(function (c) { return c.rt != null; }).map(function (c) { return { c: c, m: taste(c, p) }; }).sort(function (a, b) { return b.m.score - a.m.score; });
+    return '<div class="pad"><div class="persona"><span class="big" aria-hidden="true">' + per[0] + '</span><span class="label">Your coffee personality</span><h1 style="font-size:28px">' + per[1] + '</h1><p class="sub">Your best matches across Hong Kong.</p></div>' +
+      ranked.slice(0, 3).map(function (x, i) { return cafeCard(x.c, i, x.m); }).join("") +
+      '<span class="label">Also worth a try</span><ul class="list">' + ranked.slice(3, 9).map(function (x) { return '<li><a class="row" href="' + href(x.c) + '"><span class="n">☕</span><span><b>' + esc(x.c.n) + "</b><small>" + esc(x.c.d) + " · " + esc(x.c.o) + '</small></span><span class="score">' + x.m.score + "%</span></a></li>"; }).join("") + "</ul>" +
+      '<div class="chips"><a class="pill" href="#bean/quiz" data-retake="cafe">Retake</a><a class="pill solid" href="#bean/map">See the café map</a></div></div>';
   };
   V["bean/map"] = function () {
     var B = S.bean, ds = districtsOf(CAFES);
@@ -811,7 +894,7 @@
       (x.o ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">' + (x.type === "food" ? "🥢" : x.type === "bar" ? "🍸" : x.type === "dessert" ? "🍰" : "☕") + "</span><span><b>" + (x.type === "food" ? "Order this" : x.type === "bar" ? "Drink this" : "Get this") + "</b><small>" + esc(x.o) + "</small></span></div>" : "") +
       (x.dessert ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">🍰</span><span><b>Stay for dessert</b><small>' + esc(x.dessert) + "</small></span></div>" : "") +
       (x.no ? '<p class="note" style="font-size:16px">“' + esc(x.no) + "”</p>" : "") + tagChips(x) +
-      '<div class="chips">' + addBtn(x) + '<a class="pill" href="' + esc(mapsUrl(x)) + '" target="_blank" rel="noopener">📍 Maps</a><button class="pill" data-share="1">Share</button></div>' +
+      '<div class="chips">' + addBtn(x) + saveBtn(x) + '<a class="pill" href="' + esc(mapsUrl(x)) + '" target="_blank" rel="noopener">📍 Maps</a><button class="pill" data-share="1">Share</button></div>' +
       voteBlock(x) + branchHtml +
       sections.filter(function (s) { return s[1].length; }).map(function (s) { return '<span class="label">' + s[0] + "</span>" + pairList(s[1]); }).join("") +
       '<button class="small-link" data-closed="' + esc(x.key) + '">Has this ' + word + " closed? Let Putri know</button></div>";
@@ -833,6 +916,10 @@
       '<div class="stat"><b>' + esc(favC) + '</b><small>her most-eaten cuisine</small></div><div class="stat"><b>' + esc(favD) + "</b><small>her most-ordered drink</small></div></div>" +
       (topBar ? '<div class="stat"><b>' + RATED_BARS.length + ' <span style="font-size:16px">bars &amp; clubs</span></b><small>top pick: ' + esc(topBar.n) + "</small></div>" : "") +
       (perfect.length ? '<span class="label">Perfect-day districts</span><p class="sub" style="margin-top:-6px">Where Putri’s top café and top restaurant are both 4.5★ or better.</p><ul class="list">' + perfect.map(function (p) { return '<li><a class="row" href="' + href(p.f) + '"><span class="n">✨</span><span><b>' + esc(p.d) + "</b><small>☕ " + esc(p.c.n) + " + 🍽️ " + esc(p.f.n) + "</small></span><span></span></a></li>"; }).join("") + "</ul>" : "") +
+      (function () {
+        var rows = S.recent.map(function (v) { return { v: v, x: find((v.kind || "cafe") + "/" + slug(v.district) + "/" + slug(v.cafe)) }; }).filter(function (o) { return o.x; }).slice(0, 8);
+        return rows.length ? '<span class="label">Putri vs her friends: latest votes</span><ul class="list">' + rows.map(function (o) { return '<li><a class="row" href="' + href(o.x) + '"><span class="n">' + (o.v.verdict === "agree" ? "👍" : "👎") + "</span><span><b>" + esc(o.x.n) + "</b><small>Someone " + (o.v.verdict === "agree" ? "agrees" : "disagrees") + " with Putri’s ★ " + o.x.rt + '</small></span><span class="score">' + ago(o.v.time) + "</span></a></li>"; }).join("") + "</ul>" : "";
+      })() +
       '<span class="label">The 5★ club (' + fives.length + ')</span><div class="chips">' + fives.map(function (x) { return '<a class="pill" href="' + href(x) + '">' + icon(x) + " " + esc(x.n) + "</a>"; }).join("") + "</div></div>";
   };
 
@@ -873,6 +960,37 @@
         '<ul class="list">' + picks.map(function (x) { return '<li><button class="row" data-add="' + esc(x.key) + '"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(x.d) + (x.rt != null ? " · ★ " + x.rt : "") + (last && !qq ? " · " + walk(distTo(x, spots[spots.length - 1].ll)) : "") + '</small></span><span class="score">＋</span></button></li>'; }).join("") + "</ul>") + "</div>";
   };
 
+  function saveBtn(x) { var on = S.saved.indexOf(x.key) !== -1; return '<button class="pill" data-save="' + esc(x.key) + '" aria-pressed="' + on + '">' + (on ? "♥ Saved" : "♡ Save") + "</button>"; }
+  function restoreLink() {
+    var data = { v: 1, saved: S.saved, myday: S.myday, pf: S.food.profile, pb: S.bar.profile, pc: S.bean.profile };
+    return location.origin + location.pathname + "#restore/" + encodeURIComponent(JSON.stringify(data));
+  }
+  V.saved = function () {
+    var list = S.saved.map(find).filter(Boolean);
+    return '<div class="pad"><h1 class="app-title">♡ Saved</h1><p class="sub">Places you want to remember. Kept on this phone, no login.</p>' +
+      (list.length ? '<ul class="list">' + list.map(function (x) { return '<li><a class="row" href="' + href(x) + '"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(x.d + (x.o ? " · " + x.o : "")) + '</small></span><span class="score">' + (x.rt != null ? "★ " + x.rt : "") + "</span></a></li>"; }).join("") + "</ul>" +
+        '<div class="chips"><button class="pill solid" data-addall="' + esc(list.slice(0, 8).map(function (x) { return x.key; }).join(",")) + '">＋ Add to My day</button></div>'
+        : '<div class="empty">Nothing saved yet. Tap <b>♡ Save</b> on any place.</div>') +
+      '<span class="label">Your stuff on another phone</span><p class="sub" style="margin-top:-6px">Your saved places, My day and quiz results live on this phone. To move or back them up, send yourself this link and open it on the other device.</p>' +
+      '<div class="chips"><button class="pill" data-restorelink="1">📲 Get my link</button></div></div>';
+  };
+  V.sweet = function () {
+    var ds = districtsOf(DESSERTS);
+    return '<div class="pad"><h1 class="app-title">🍰 Sweet tooth</h1><p class="sub">Putri always needs a sweet treat after a meal. These are her dessert spots.</p>' +
+      (ds.length ? ds.map(function (d) {
+        var here = DESSERTS.filter(function (x) { return x.d === d; }).sort(byRank);
+        return '<span class="label">' + esc(d) + "</span>" + placeRows(here);
+      }).join("") : '<div class="empty">Desserts are on their way.</div>') + "</div>";
+  };
+  // A plan someone shared with you (#plan/…)
+  V.sharedplan = function () {
+    var list = (S.shared || []).map(find).filter(Boolean), total = 0;
+    for (var i = 1; i < list.length; i++) total += km(list[i - 1], list[i]);
+    return '<div class="pad"><h1 class="app-title">A day out, shared with you</h1><p class="sub">' + plural(list.length, "stop") + (list.length > 1 ? " · about " + total.toFixed(1) + " km of walking" : "") + "</p>" +
+      (list.length ? '<ul class="list">' + list.map(function (x, j) { return '<li><a class="row" href="' + href(x) + '"><span class="n">' + (j + 1) + "</span><span><b>" + icon(x) + " " + esc(x.n) + "</b><small>" + esc(x.d + (x.o ? " · " + x.o : "")) + '</small></span><span class="score">' + (x.rt != null ? "★ " + x.rt : "") + "</span></a></li>"; }).join("") + "</ul>" +
+        '<div class="chips"><button class="pill solid" data-useplan="1">Use this as My day</button><a class="pill" href="' + esc(routeUrl(list)) + '" target="_blank" rel="noopener">🚶 Open in Google Maps</a></div>'
+        : '<div class="empty">This plan is empty, or its places have closed.</div>') + "</div>";
+  };
   V.note = function () {
     var k = S.noteKind;
     var kinds = [["food", "🍽️ A restaurant"], ["bar", "🍸 A bar or club"], ["dessert", "🍰 A dessert spot"], ["cafe", "☕ A café"], ["idea", "💡 An idea or bug"], ["hi", "👋 Just saying hi"]];
@@ -887,16 +1005,16 @@
   };
 
   // ---------- Router ----------
-  var MODULE_OF = { home: "hub", near: "hub", putri: "hub", myday: "hub", note: "hub" };
+  var MODULE_OF = { home: "hub", near: "hub", putri: "hub", myday: "hub", note: "hub", saved: "hub", sweet: "hub", sharedplan: "hub" };
   var THEME = { hub: "hub", bean: "bean", food: "food", bar: "bar", sip: "day" };
   var NAVS = {
     hub: [["", "🏠", "Home"], ["near", "📍", "Near me"], ["putri", "🌷", "Putri"], ["myday", "📋", "My day"]],
-    bean: [["", "⌂", "Home"], ["bean", "☕", "Bean There"], ["bean/map", "🗺️", "Map"], ["myday", "📋", "My day"]],
+    bean: [["", "⌂", "Home"], ["bean/map", "🗺️", "Map"], ["bean/results", "☕", "Match"], ["myday", "📋", "My day"]],
     food: [["", "⌂", "Home"], ["food/map", "🗺️", "Map"], ["food/results", "😋", "Craving"], ["food/spin", "🥢", "Spin"], ["myday", "📋", "My day"]],
     bar: [["", "⌂", "Home"], ["bar/hotspots", "📍", "Hotspots"], ["bar/results", "🍸", "Vibe"], ["bar/spin", "🍾", "Spin"], ["myday", "📋", "My day"]],
     sip: [["", "⌂", "Home"], ["sip/suggest", "✨", "Plans"], ["sip/days", "🗓️", "Days"], ["sip/map", "🗺️", "Map"], ["myday", "📋", "My day"]]
   };
-  var TITLES = { "": "Out & About by Putri", bean: "Bean There", "bean/map": "Café map", food: "Seconds, Please", "food/quiz": "Craving Match", "food/results": "Your matches", "food/map": "Restaurant map", "food/lunch": "Lunch Set Finder", "food/spin": "Spin the Chopsticks", bar: "Pour Decisions", "bar/quiz": "Vibe Match", "bar/results": "Your matches", "bar/hotspots": "Hotspots", "bar/spin": "Spin the Bottle", sip: "Sip & Bite", "sip/plans": "Plans", "sip/suggest": "Putri suggests", "sip/days": "Ready-made days", "sip/map": "One map", near: "Near me", putri: "Putri’s page", myday: "My day", note: "Send Putri a note" };
+  var TITLES = { "": "Out & About by Putri", bean: "Bean There", "bean/map": "Café map", food: "Seconds, Please", "food/quiz": "Craving Match", "food/results": "Your matches", "food/map": "Restaurant map", "food/lunch": "Lunch Set Finder", "food/spin": "Spin the Chopsticks", bar: "Pour Decisions", "bar/quiz": "Vibe Match", "bar/results": "Your matches", "bar/hotspots": "Hotspots", "bar/spin": "Spin the Bottle", sip: "Sip & Bite", "sip/plans": "Plans", "sip/suggest": "Putri suggests", "sip/days": "Ready-made days", "sip/map": "One map", near: "Near me", putri: "Putri’s page", myday: "My day", note: "Send Putri a note", saved: "Saved", sweet: "Sweet tooth", sharedplan: "A shared day out", "bean/quiz": "Taste Match", "bean/results": "Your matches" };
   var lastModule = "hub";
 
   function current() {
@@ -905,7 +1023,9 @@
       var x = find(h.slice(2));
       return x ? { name: "place", x: x, module: { cafe: "bean", food: "food", dessert: "food", bar: "bar" }[x.type] } : { name: "gone", module: "hub" };
     }
-    if (!V[h === "" ? "home" : h]) return { name: "home", module: "hub", path: "" };
+    if (h.indexOf("plan/") === 0) { S.shared = h.slice(5).split(",").filter(String); return { name: "sharedplan", module: "hub", path: "sharedplan" }; }
+    if (h.indexOf("restore/") === 0 || h.indexOf("import/") === 0) return { name: "incoming", module: "hub", raw: h };
+    if (h === "sharedplan" || !V[h === "" ? "home" : h]) return { name: "home", module: "hub", path: "" };
     var mod = MODULE_OF[h || "home"] || h.split("/")[0];
     return { name: h || "home", module: mod, path: h };
   }
@@ -922,14 +1042,36 @@
     if (trail.length > 1) { history.back(); return; }
     var up = parentHash(); replacing = true; trail = [up]; location.replace(up);
   }
+  // Links that bring things in: #restore/… (your own stuff from another phone) and #import/… (a saved list from the old Bean There site).
+  function takeIncoming(raw) {
+    var msg = "";
+    try {
+      if (raw.indexOf("restore/") === 0) {
+        var d = JSON.parse(raw.slice(8)), n = 0;
+        (d.saved || []).forEach(function (k) { if (BYKEY[k] && S.saved.indexOf(k) === -1) { S.saved.push(k); n++; } });
+        if (!S.myday.length && d.myday) { S.myday = d.myday.filter(function (k) { return BYKEY[k]; }).slice(0, 8); saveDay(); }
+        if (d.pf && !S.food.profile) { S.food.profile = d.pf; save("oa-food-profile", d.pf); }
+        if (d.pb && !S.bar.profile) { S.bar.profile = d.pb; save("oa-bar-profile", d.pb); }
+        if (d.pc && !S.bean.profile) { S.bean.profile = d.pc; save("oa-bean-profile", d.pc); }
+        msg = "Your places are on this phone now ✓";
+      } else {
+        var m = 0;
+        raw.slice(7).split(".").forEach(function (pair) { var k = "cafe/" + pair.replace("~", "/"); if (BYKEY[k] && S.saved.indexOf(k) === -1) { S.saved.push(k); m++; } });
+        msg = m ? plural(m, "café") + " from your Bean There list saved ✓" : "Welcome to Out & About";
+      }
+      save("oa-saved", S.saved);
+    } catch (e) { msg = "That link didn’t work. Ask for a new one."; }
+    location.replace("#saved"); setTimeout(function () { toast(msg); }, 150);
+  }
   var lastKey = "";
   function render(keep) {
     var r = current(), y = window.scrollY, html;
+    if (r.name === "incoming") { takeIncoming(r.raw); return; }
     if (r.name === "gone") { location.replace("#"); setTimeout(function () { toast("That place has closed or moved, so it’s no longer on Out & About."); }, 60); return; }
     if (r.name === "place") html = V.place(r.x);
     else html = V[r.name === "home" ? "home" : r.name]();
     if (html == null) { // results without a quiz yet
-      location.replace({ "food/results": "#food/quiz", "bar/results": "#bar/quiz", "sip/suggest": "#sip/plans" }[r.name] || "#"); return;
+      location.replace({ "food/results": "#food/quiz", "bar/results": "#bar/quiz", "bean/results": "#bean/quiz", "sip/suggest": "#sip/plans" }[r.name] || "#"); return;
     }
     var key = r.name + (r.x ? r.x.key : "");
     if (key !== lastKey) keep = false;
@@ -939,7 +1081,7 @@
     document.body.className = "theme-" + theme;
     app.innerHTML = html;
     if (["bean", "food", "bar", "sip"].indexOf(r.name) !== -1) app.insertAdjacentHTML("afterbegin", '<a class="land-back" href="#">← Home</a>');
-    var bare = ["bean", "food", "bar", "sip", "food/quiz", "bar/quiz", "sip/plans"].indexOf(r.name) !== -1;
+    var bare = ["bean", "food", "bar", "sip", "food/quiz", "bar/quiz", "sip/plans", "bean/quiz"].indexOf(r.name) !== -1;
     topbar.hidden = r.name === "home" || bare;
     navEl.hidden = bare;
     app.className = bare ? "no-nav" : "";
@@ -963,13 +1105,14 @@
     var st = S.quiz, kind = st.kind;
     if (kind === "food") { S.food.profile = st.draft; save("oa-food-profile", st.draft); }
     if (kind === "bar") { S.bar.profile = st.draft; save("oa-bar-profile", st.draft); }
+    if (kind === "cafe") { S.bean.profile = st.draft; save("oa-bean-profile", st.draft); }
     if (kind === "day") { S.day.profile = st.draft; S.day.pswaps = {}; save("oa-day-profile", st.draft); }
     S.quiz = null;
     if (kind === "day") { location.hash = "#sip/suggest"; return; }
     S.cooking = kind; render();
-    var lines = kind === "food" ? ["Reading Putri’s reviews", "Counting your budget", "Plating up"] : ["Reading Putri’s reviews", "Checking the dance floors", "Adding a cherry on top"];
+    var lines = kind === "food" ? ["Reading Putri’s reviews", "Counting your budget", "Plating up"] : kind === "cafe" ? ["Reading Putri’s notes", "Checking the beans", "Pouring"] : ["Reading Putri’s reviews", "Checking the dance floors", "Adding a cherry on top"];
     lines.forEach(function (l, i) { timers.push(setTimeout(function () { var el = document.getElementById("cookline"); if (el) el.textContent = l; }, (i + 1) * 550)); });
-    timers.push(setTimeout(function () { S.cooking = null; location.hash = kind === "food" ? "#food/results" : "#bar/results"; }, reduceMotion ? 300 : 2300));
+    timers.push(setTimeout(function () { S.cooking = null; location.hash = kind === "food" ? "#food/results" : kind === "cafe" ? "#bean/results" : "#bar/results"; }, reduceMotion ? 300 : 2300));
   }
 
   // ---------- Events ----------
@@ -1011,7 +1154,7 @@
       while (list.length) { var bi = 0; list.forEach(function (x, j) { if (distTo(x, at) < distTo(list[bi], at)) bi = j; }); var nx = list.splice(bi, 1)[0]; at = nearestSpot(nx, at).ll; out.push(nx); }
       S.myday = out.map(function (x) { return x.key; }); saveDay(); toast("Shortest walking order ✓"); render(true); return;
     }
-    if (d.shareday) { var l = S.myday.map(find).filter(Boolean); shareLink("My day", "My day out, planned with Out & About by Putri: " + l.map(function (x) { return x.n; }).join(" → "), dayRouteUrl(l, daySpots(l))); return; }
+    if (d.shareday) { var l = S.myday.map(find).filter(Boolean); shareLink("A day out", "A day out, planned with Out & About by Putri: " + l.map(function (x) { return x.n; }).join(" → ") + ". Open it here:", location.origin + location.pathname + "#plan/" + l.map(function (x) { return x.key; }).join(",")); return; }
     if (d.share) { var x0 = current().x; if (x0) shareLink(x0.n, x0.n + " (" + x0.d + "), recommended by Putri on Out & About", location.href); return; }
     if (d.lunch) { S.food.lunch = !S.food.lunch; render(true); return; }
     if (d.spinloc) { S[current().module].spinLoc = d.spinloc; render(true); return; }
@@ -1032,6 +1175,10 @@
         function () { S.near.locating = false; toast("Couldn’t get your location. Pick a district instead."); render(true); }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 120000 });
       return;
     }
+    if (d.save) { var si = S.saved.indexOf(d.save); if (si === -1) { S.saved.push(d.save); toast("Saved ♥"); } else { S.saved.splice(si, 1); toast("Removed from Saved"); } save("oa-saved", S.saved); render(true); return; }
+    if (d.dismiss) { save(d.dismiss, true); render(true); return; }
+    if (d.restorelink) { shareLink("My Out & About", "My Out & About places:", restoreLink()); return; }
+    if (d.useplan) { if (S.myday.length && !confirm("Replace your current My day with this plan?")) return; S.myday = (S.shared || []).filter(function (k) { return BYKEY[k]; }).slice(0, 8); saveDay(); location.hash = "#myday"; return; }
     if (d.notekind) { S.noteKind = d.notekind; render(true); return; }
     if (d.morebranches) { app.querySelectorAll(".more-branch").forEach(function (li) { li.hidden = false; }); t.remove(); return; }
     if (d.vote) {
@@ -1074,6 +1221,7 @@
     if (e.target.id === "budget") { S.food.budget = +e.target.value; var lbl = document.getElementById("budget-lbl"); if (lbl) lbl.textContent = current().name === "food/lunch" ? "Up to HK$" + e.target.value : budgetLabel(+e.target.value); }
     if (e.target.id === "barbudget") { S.bar.budget = +e.target.value; var bl = document.getElementById("barbudget-lbl"); if (bl) bl.textContent = +e.target.value >= 200 ? "Any price" : "Up to HK$" + e.target.value; }
     if (e.target.id === "fq") { S.food.query = e.target.value; keepFocus("fq"); }
+    if (e.target.id === "hq") { S.hq = e.target.value; keepFocus("hq"); }
     if (e.target.id === "mq") { S.mq = e.target.value; keepFocus("mq"); }
   });
   document.addEventListener("change", function (e) { if (e.target.id === "budget" || e.target.id === "barbudget") render(true); });
