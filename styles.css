@@ -355,3 +355,29 @@ a.cta, a.back { text-decoration: none; text-align: center; }
 .perk-card small { color: #5A4A2A !important; }
 
 .sync-card small { display: block; }
+
+/* ---------- Booking ---------- */
+.book-box { display: grid; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 14px; }
+.book-box .cta { max-width: none; }
+.book-box small { color: var(--muted); font-size: 13px; }
+.book-box.walk { background: var(--soft); border-color: transparent; }
+.book-alt { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.modal { position: fixed; inset: 0; z-index: 50; background: rgba(30, 20, 15, .45); display: flex; align-items: flex-end; justify-content: center; }
+.modal[hidden] { display: none; }
+body.modal-open { overflow: hidden; }
+.modal-panel { position: relative; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; background: var(--bg); color: var(--fg); border-radius: 24px 24px 0 0; padding: 20px max(18px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px)); display: grid; gap: 12px; animation: up .22s ease; box-shadow: var(--shadow); }
+@keyframes up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+.modal-x { position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+.modal-panel .cta { max-width: none; }
+.when { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 8px; }
+.when .field input { width: 100%; min-width: 0; padding: 9px 8px; }
+.stepper { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 4px; }
+.stepper button { width: 30px; height: 30px; border-radius: 9px; border: 0; background: var(--soft); color: var(--fg); font-size: 16px; font-weight: 700; cursor: pointer; }
+.wa-bubble { background: #DCF8C6; color: #1F2A1C; border-radius: 14px 14px 4px 14px; padding: 10px 12px; font-size: 14px; line-height: 1.45; justify-self: end; max-width: 92%; }
+.wa-chat { display: grid; gap: 8px; background: #ECE5DD; border-radius: 16px; padding: 12px; }
+.wa-head { font-weight: 700; font-size: 13px; color: #075E54; }
+.wa-chat .meta { color: #54656F; margin: 0; }
+.st { display: table; margin-top: 4px; border: 0; border-radius: 999px; padding: 2px 9px; font-size: 11.5px; font-weight: 700; text-align: left; }
+.st-walk { background: var(--soft); color: var(--muted); }
+.st-todo { background: #FCE7C8; color: #8A4B08; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .modal-panel { animation: none; } }

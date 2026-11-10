@@ -75,7 +75,8 @@
   function base(o, type) {
     return { type: type, d: o.district, n: o.name, rk: num(o.rank), rt: num(o.rating), o: o.mustorder || "", p: o.price || "", pp: firstNum(o.price),
       no: o.note || "", tags: tagsOf(o.tags), maps: o.mapslink || "", ll: coords(o.latlng), added: parseDate(o.added),
-      bnote: o.bookingnote || o.bookingtip || "", perk: o.perk || o.perks || "" };
+      bnote: o.bookingnote || o.bookingtip || "", perk: o.perk || o.perks || "",
+      bk: { link: o.bookinglink || "", wa: o.whatsapp || "", tel: o.phone || "", ig: o.instagram || "", type: (o.bookingtype || "").toLowerCase().trim() } };
   }
   function keyOf(x) { return x.type + "/" + slug(x.d) + "/" + slug(x.n); }
   // Branches from the BRANCHES tab (filled in by the monthly check): every open branch of each place, by kind + name.
@@ -110,6 +111,8 @@
     FOOD.concat(CAFES, BARS, DESSERTS).forEach(function (x) { x.key = keyOf(x); BYKEY[x.key] = x; });
     computeGeo();
     buildBranches(br || []);
+    // Prototype only: example booking details. Never set on the live site.
+    if (CFG.demoBookings) Object.keys(CFG.demoBookings).forEach(function (k) { var x = BYKEY[k], d = CFG.demoBookings[k]; if (!x) return; Object.assign(x.bk, d.bk || {}); if (d.bnote) x.bnote = d.bnote; if (d.perk) x.perk = d.perk; });
   }
   function find(key) { return BYKEY[key]; }
   // Other branches of x: every open branch except the one Putri visited (anything within ~150 m of x itself).
@@ -174,6 +177,105 @@
   function href(x) { return "#p/" + x.key; }
   var TAGS = { "lunch-set": "🍱 Lunch set", value: "💸 Good value", cheap: "🪙 Cheap", pricey: "💎 Pricey", spicy: "🌶️ Spicy", buffet: "🍽️ Buffet", "big-portion": "🍛 Big portions", "small-portion": "🥄 Small portions", "veggie-friendly": "🥦 Veggie-friendly", "late-night": "🌙 Late night", group: "👯 Groups", healthy: "🥗 Healthy", "small-space": "🤏 Small space", cute: "🌸 Cute", "work-friendly": "💻 Work-friendly", cozy: "🛋️ Cosy", "takeaway-only": "🥡 Takeaway only", "time-limit": "⏱️ Time limit", "no-ports": "🔌 No sockets", "cash-only": "💵 Cash only", cocktails: "🍸 Cocktails", wine: "🍷 Wine", shots: "🥃 Shots", dancing: "🪩 Dancing", pretty: "✨ Pretty", crowded: "👥 Gets crowded", "best-on-weekdays": "📅 Best on weekdays", "free-shots": "🎁 Free shots" };
   function tagChips(x) { return x.tags.length || x.perk ? '<div class="chips">' + (x.perk ? '<span class="chip perk">🎁 Perk</span>' : "") + x.tags.map(function (t) { return '<span class="chip">' + esc(TAGS[t] || t) + "</span>"; }).join("") + "</div>" : ""; }
+  // ---------- Booking ----------
+  // One Book button per place. What it does depends on the sheet (Booking Type, Booking Link, WhatsApp, Phone):
+  //   deposit  → opens the restaurant's own booking/payment page
+  //   online   → opens their booking page with the date, time and people already filled in where the site supports it
+  //   whatsapp → opens WhatsApp with a ready-written message
+  //   call     → dials the number
+  //   walk-in  → no button, just says so
+  // The app never submits a booking itself and keeps no record of it.
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function isoDay(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  function fmtDate(iso) { var d = new Date(iso + "T00:00"); return isNaN(d) ? iso : d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }); }
+  function fmtTime(t) { var m = /^(\d{1,2}):(\d{2})/.exec(t || ""); if (!m) return t || ""; var h = +m[1], ap = h >= 12 ? "pm" : "am"; h = h % 12 || 12; return h + (m[2] === "00" ? "" : ":" + m[2]) + ap; }
+  function phoneDigits(s) { var d = String(s || "").replace(/[^\d]/g, ""); return d.length === 8 ? "852" + d : d; }
+  var PLATFORMS = [
+    // name, how to recognise its links, and how it takes date/time/people in the link (null = it doesn't, as far as we know)
+    ["TableCheck", /tablecheck\.com/, function (b) { return { start_date: b.date, start_time: b.time, num_people: b.party }; }],
+    ["SevenRooms", /sevenrooms\.com/, function (b) { return { date: b.date, start_time: b.time, party_size: b.party }; }],
+    ["OpenTable", /opentable\./, function (b) { return { covers: b.party, dateTime: b.date + "T" + b.time }; }],
+    ["inline", /inline\.app/, function (b) { return { date: b.date, time: b.time, adult: b.party }; }],
+    ["Chope", /chope\.co/, function (b) { return { date: b.date, time: b.time, adults: b.party }; }],
+    ["OpenRice", /openrice\.com/, null]
+  ];
+  function platformOf(url) { for (var i = 0; i < PLATFORMS.length; i++) if (PLATFORMS[i][1].test(url)) return PLATFORMS[i]; return ["their website", /./, null]; }
+  function prefilled(url, b) {
+    var pf = platformOf(url); if (!pf[2]) return url;
+    var extra = pf[2](b), q = Object.keys(extra).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(extra[k]); }).join("&");
+    return url + (url.indexOf("?") === -1 ? "?" : "&") + q;
+  }
+  function waMessage(b) { return "Hi! I’d like to book a table for " + b.party + " on " + fmtDate(b.date) + " at " + fmtTime(b.time) + ". Found you on Out & About by Putri 😊"; }
+  function bookType(x) {
+    var k = x.bk, t = k.type;
+    if (/walk/.test(t)) return "walkin";
+    if (/deposit|prepay|pay/.test(t) && k.link) return "deposit";
+    if (/whats/.test(t) && k.wa) return "whatsapp";
+    if (/call|phone/.test(t) && k.tel) return "call";
+    if (k.link) return "online";
+    if (k.wa) return "whatsapp";
+    if (k.tel) return "call";
+    if (/walk[\s-]?in/i.test(x.bnote)) return "walkin";
+    return x.type === "cafe" || x.type === "dessert" ? "walkin-usual" : "unknown";
+  }
+  function openRiceUrl(x) { return "https://www.openrice.com/en/hongkong/restaurants?what=" + encodeURIComponent(x.n); }
+  function bookDraft(x) { return S.bookWhen || { date: isoDay(new Date()), time: { cafe: "11:00", food: "19:00", dessert: "20:30", bar: "21:30" }[x.type] || "19:00", party: 2 }; }
+  // The main action for a place: label, where it goes, and whether we ask "when?" first.
+  function bookAction(x, b) {
+    var k = x.bk, t = bookType(x), pf = k.link ? platformOf(k.link) : null;
+    if (t === "deposit") return { type: t, icon: "💳", label: "Book (deposit required)", hint: "Opens " + (pf[0] === "their website" ? "the restaurant’s booking page" : pf[0]) + ", where you pay the deposit.", href: prefilled(k.link, b), ask: !!pf[2] };
+    if (t === "online") return { type: t, icon: "📅", label: "Book on " + pf[0], hint: pf[2] ? "Opens with your date, time and people filled in. You just confirm." : "Opens their page. You pick the time there.", href: prefilled(k.link, b), ask: !!pf[2] };
+    if (t === "whatsapp") return { type: t, icon: "💬", label: "Book on WhatsApp", hint: "Opens WhatsApp with the message written. You press send.", href: "https://wa.me/" + phoneDigits(k.wa) + "?text=" + encodeURIComponent(waMessage(b)), ask: true };
+    if (t === "call") return { type: t, icon: "📞", label: "Call to book", hint: "Phone bookings only · " + k.tel, href: "tel:+" + phoneDigits(k.tel), ask: false };
+    return null;
+  }
+  function bookSection(x) {
+    var t = bookType(x), a = bookAction(x, bookDraft(x)), k = x.bk;
+    if (t === "walkin") return '<div class="book-box walk"><b>🚶 Walk-in only</b><small>No bookings. Just turn up.</small></div>';
+    if (t === "walkin-usual") return '<div class="book-box walk"><b>🚶 Walk-in</b><small>No booking needed, as far as Putri knows.</small></div>';
+    if (t === "unknown") return '<div class="book-box"><b>📅 Booking</b><small>Putri hasn’t added how to book here yet.</small><div class="chips">' + (x.type === "food" ? '<a class="pill" href="' + esc(openRiceUrl(x)) + '" target="_blank" rel="noopener">Look on OpenRice</a>' : "") + '<a class="pill" href="' + esc(mapsUrl(x)) + '" target="_blank" rel="noopener">Find their number</a></div></div>';
+    var others = [];
+    if (t !== "whatsapp" && k.wa) others.push('<button class="small-link" data-bookalt="whatsapp">or WhatsApp</button>');
+    if (t !== "call" && k.tel) others.push('<a class="small-link" href="tel:+' + phoneDigits(k.tel) + '">or call ' + esc(k.tel) + "</a>");
+    if (k.ig) others.push('<a class="small-link" href="' + esc(/^https?:/.test(k.ig) ? k.ig : "https://instagram.com/" + String(k.ig).replace(/^@/, "")) + '" target="_blank" rel="noopener">Instagram</a>');
+    return '<div class="book-box"><button class="cta cta-main" data-book="' + esc(x.key) + '">' + a.icon + " " + esc(a.label) + "</button><small>" + esc(a.hint) + "</small>" + (others.length ? '<div class="book-alt">' + others.join("") + "</div>" : "") + "</div>";
+  }
+  function bookSheet(x) {
+    var m = S.modal, b = bookDraft(x), a = m.alt === "whatsapp" ? bookAction({ bk: { wa: x.bk.wa, type: "whatsapp" }, type: x.type, bnote: "" }, b) : bookAction(x, b);
+    return '<span class="label" style="margin:0">' + icon(x) + " " + esc(x.d) + '</span><h2 id="sheet-title" class="app-title" style="font-size:24px">Book ' + esc(x.n) + "</h2>" +
+      '<div class="when"><div class="field"><label for="b-date">Date</label><input id="b-date" type="date" min="' + isoDay(new Date()) + '" value="' + esc(b.date) + '"></div>' +
+      '<div class="field"><label for="b-time">Time</label><input id="b-time" type="time" step="900" value="' + esc(b.time) + '"></div>' +
+      '<div class="field"><label>People</label><div class="stepper"><button type="button" data-party="-1" aria-label="Fewer people">−</button><b id="b-party">' + b.party + '</b><button type="button" data-party="1" aria-label="More people">+</button></div></div></div>' +
+      (a.type === "whatsapp" ? '<div class="wa-bubble" id="wa-preview">' + esc(waMessage(b)) + "</div>" : "") +
+      (x.bnote ? '<p class="meta" style="margin:0">📅 ' + esc(x.bnote) + "</p>" : "") + (x.perk ? '<p class="meta" style="margin:0">🎁 ' + esc(x.perk) + "</p>" : "") +
+      '<button class="cta cta-main" data-bookgo="1">' + a.icon + " " + esc(a.type === "whatsapp" ? "Open WhatsApp" : a.type === "deposit" ? "Continue to pay the deposit" : "Continue on " + platformOf(x.bk.link)[0]) + "</button>" +
+      '<p class="meta" style="margin:0;text-align:center">' + esc(a.type === "whatsapp" ? "They’ll reply in WhatsApp to confirm." : "Your confirmation comes from them, not from this app.") + "</p>";
+  }
+  function demoSheet(x) {
+    var o = S.modal.demo;
+    return '<span class="label" style="margin:0">Prototype: what happens next</span><h2 id="sheet-title" class="app-title" style="font-size:22px">' + esc(o.title) + "</h2>" + o.html +
+      '<button class="cta cta-ghost" data-closesheet="1">Back to Out &amp; About</button>';
+  }
+  function renderModal() {
+    var m = S.modal, el = document.getElementById("modal");
+    el.hidden = !m; document.body.classList.toggle("modal-open", !!m);
+    if (!m) { el.innerHTML = ""; return; }
+    var x = find(m.key);
+    el.innerHTML = '<div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title"><button class="modal-x" data-closesheet="1" aria-label="Close">✕</button>' + (m.demo ? demoSheet(x) : bookSheet(x)) + "</div>";
+  }
+  function readWhen() { return { date: document.getElementById("b-date").value, time: document.getElementById("b-time").value, party: +document.getElementById("b-party").textContent }; }
+  // Leave the app for the booking page, WhatsApp or the phone. In the prototype, show what would open instead.
+  function leaveTo(x, a, b) {
+    if (CFG.demoBooking) {
+      var html = a.type === "whatsapp" ? '<div class="wa-chat"><div class="wa-head">💬 WhatsApp · ' + esc(x.n) + '</div><div class="wa-bubble">' + esc(waMessage(b)) + '</div><p class="meta">You press send. They reply to confirm.</p></div>'
+        : a.type === "call" ? "<p>Your phone calls <b>" + esc(x.bk.tel) + "</b>.</p>"
+        : "<p><b>" + esc(platformOf(x.bk.link)[0]) + "</b> opens on " + esc(x.n) + "’s booking page" + (a.ask ? ", already set to <b>" + esc(fmtDate(b.date) + ", " + fmtTime(b.time) + ", " + b.party + (b.party === 1 ? " person" : " people")) + "</b>" : "") + ". " + (a.type === "deposit" ? "You pay the deposit there and get their confirmation." : "You confirm there and get their confirmation.") + '</p><p class="meta" style="word-break:break-all">' + esc(a.href) + "</p>";
+      S.modal = { key: x.key, demo: { title: a.label, html: html } }; renderModal(); return;
+    }
+    S.modal = null; renderModal();
+    if (a.type === "call") location.href = a.href; else window.open(a.href, "_blank", "noopener");
+  }
+
   // Putri's own advice on getting a table, and any perk for booking a certain way (Booking Note and Perk columns).
   function tipCards(x) {
     return (x.perk ? '<div class="banner perk-card"><span aria-hidden="true" style="font-size:24px">🎁</span><span><b>Putri’s perk</b><small>' + esc(x.perk) + "</small></span></div>" : "") +
@@ -903,7 +1005,7 @@
       '<div class="stats4"><div class="stat"><b>' + (x.rt != null ? "★ " + x.rt : "–") + '</b><small>Putri’s rating' + (branchesOf(x).length ? " · " + (branchesOf(x).length + 1) + " branches" : "") + '</small></div><div class="stat"><b>' + esc(price(x) || "–") + "</b><small>" + (x.type === "food" ? "per person" : x.type === "bar" ? "per drink" : "price") + "</small></div></div></div>" +
       (x.o ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">' + (x.type === "food" ? "🥢" : x.type === "bar" ? "🍸" : x.type === "dessert" ? "🍰" : "☕") + "</span><span><b>" + (x.type === "food" ? "Order this" : x.type === "bar" ? "Drink this" : "Get this") + "</b><small>" + esc(x.o) + "</small></span></div>" : "") +
       (x.dessert ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">🍰</span><span><b>Stay for dessert</b><small>' + esc(x.dessert) + "</small></span></div>" : "") +
-      (x.no ? '<p class="note" style="font-size:16px">“' + esc(x.no) + "”</p>" : "") + tagChips(x) + tipCards(x) +
+      (x.no ? '<p class="note" style="font-size:16px">“' + esc(x.no) + "”</p>" : "") + tagChips(x) + tipCards(x) + bookSection(x) +
       '<div class="chips">' + addBtn(x) + saveBtn(x) + '<a class="pill" href="' + esc(mapsUrl(x)) + '" target="_blank" rel="noopener">📍 Maps</a><button class="pill" data-share="1">Share</button></div>' +
       voteBlock(x) + branchHtml +
       sections.filter(function (s) { return s[1].length; }).map(function (s) { return '<span class="label">' + s[0] + "</span>" + pairList(s[1]); }).join("") +
@@ -947,6 +1049,11 @@
     return "https://www.google.com/maps/dir/?api=1&travelmode=walking&origin=" + encodeURIComponent(qs[0]) + "&destination=" + encodeURIComponent(qs[qs.length - 1]) +
       (qs.length > 2 ? "&waypoints=" + encodeURIComponent(qs.slice(1, -1).join("|")) : "");
   }
+  function dayBookHint(x) {
+    var t = bookType(x), a = bookAction(x, bookDraft(x));
+    if (a) return '<button class="st st-todo" data-book="' + esc(x.key) + '">' + a.icon + " " + esc(a.type === "deposit" ? "Book · deposit" : a.label) + "</button>";
+    return t === "unknown" ? "" : '<span class="st st-walk">🚶 Walk-in</span>';
+  }
   V.myday = function () {
     var list = S.myday.map(find).filter(Boolean), total = 0, spots = daySpots(list);
     for (var i = 1; i < list.length; i++) total += kmPts(spots[i - 1].ll, spots[i].ll);
@@ -958,7 +1065,7 @@
       '<div class="md-strip" aria-hidden="true"><span>☕ Bean There</span><span>🍽️ Seconds, Please</span><span>🍸 Pour Decisions</span><span>✨ Sip &amp; Bite</span></div>' +
       (list.length ? '<ol class="day-list">' + list.map(function (x, j) {
         return (j ? '<li class="day-gap" aria-hidden="true">🚶 ' + walk(kmPts(spots[j - 1].ll, spots[j].ll)) + "</li>" : "") +
-          '<li class="day-item"><span class="num ' + (x.type === "dessert" ? "food" : x.type) + '">' + (j + 1) + '</span><span style="min-width:0"><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc(spots[j].branch ? spots[j].branch.label + " branch" : x.d) + (x.o ? " · " + esc(x.o) : "") + "</small></span>" +
+          '<li class="day-item"><span class="num ' + (x.type === "dessert" ? "food" : x.type) + '">' + (j + 1) + '</span><span style="min-width:0"><a class="nm" href="' + href(x) + '" style="text-decoration:none">' + icon(x) + " " + esc(x.n) + "</a><small>" + esc(spots[j].branch ? spots[j].branch.label + " branch" : x.d) + (x.o ? " · " + esc(x.o) : "") + "</small>" + dayBookHint(x) + "</span>" +
           '<span class="ctrl"><button data-up="' + j + '" aria-label="Move ' + esc(x.n) + ' up"' + (j ? "" : " disabled") + '>↑</button><button data-down="' + j + '" aria-label="Move ' + esc(x.n) + ' down"' + (j < list.length - 1 ? "" : " disabled") + '>↓</button><button data-rm="' + j + '" aria-label="Remove ' + esc(x.n) + '">✕</button></span></li>';
       }).join("") + "</ol>" +
         '<p class="meta" style="margin:0">' + plural(list.length, "stop") + (list.length > 1 ? " · about " + total.toFixed(1) + " km of walking" : "") + "</p>" +
@@ -1188,7 +1295,7 @@
     document.title = r.name === "place" ? r.x.n + " · Out & About by Putri" : (r.name === "home" ? "" : (TITLES[r.path] || "") + " · ") + "Out & About by Putri";
     window.scrollTo(0, keep ? y : 0);
   }
-  window.addEventListener("hashchange", function () { clearTimers(); S.cooking = null; render(); });
+  window.addEventListener("hashchange", function () { clearTimers(); S.cooking = null; if (S.modal) { S.modal = null; renderModal(); } render(); });
   window.addEventListener("hashchange", function () {
     var h = location.hash || "#";
     if (replacing) { replacing = false; return; }
@@ -1270,6 +1377,18 @@
       return;
     }
     if (d.save) { var si = S.saved.indexOf(d.save); if (si === -1) { S.saved.push(d.save); toast("Saved ♥"); } else { S.saved.splice(si, 1); toast("Removed from Saved"); } save("oa-saved", S.saved); render(true); return; }
+    if (d.closesheet) { S.modal = null; renderModal(); return; }
+    if (d.book || d.bookalt) {
+      var bx = find(d.book || current().x.key), ba = d.bookalt ? { ask: true } : bookAction(bx, bookDraft(bx));
+      if (!ba.ask) { leaveTo(bx, ba, bookDraft(bx)); return; }
+      S.modal = { key: bx.key, alt: d.bookalt || "" }; renderModal(); return;
+    }
+    if (d.party) { var pe = document.getElementById("b-party"); pe.textContent = Math.max(1, Math.min(20, +pe.textContent + +d.party)); S.bookWhen = readWhen(); var wp = document.getElementById("wa-preview"); if (wp) wp.textContent = waMessage(S.bookWhen); return; }
+    if (d.bookgo) {
+      var gx = find(S.modal.key), gb = readWhen(); S.bookWhen = gb;
+      var ga = S.modal.alt === "whatsapp" ? bookAction({ bk: { wa: gx.bk.wa, type: "whatsapp" }, type: gx.type, bnote: "" }, gb) : bookAction(gx, gb);
+      leaveTo(gx, ga, gb); return;
+    }
     if (d.signin) { signIn(); return; }
     if (d.signout) { signOut(); return; }
     if (d.dismiss) { save(d.dismiss, true); render(true); return; }
@@ -1296,6 +1415,11 @@
       }).catch(function () { toast("Couldn’t send it. Are you online?"); });
       return;
     }
+  });
+  document.getElementById("modal").addEventListener("click", function (e) { if (e.target.id === "modal") { S.modal = null; renderModal(); } });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && S.modal) { S.modal = null; renderModal(); } });
+  document.addEventListener("change", function (e) {
+    if ((e.target.id === "b-date" || e.target.id === "b-time") && S.modal) { S.bookWhen = readWhen(); var wp = document.getElementById("wa-preview"); if (wp) wp.textContent = waMessage(S.bookWhen); }
   });
   document.addEventListener("submit", function (e) {
     if (e.target.id !== "note-form") return;
