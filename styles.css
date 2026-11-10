@@ -349,3 +349,7 @@ a.cta, a.back { text-decoration: none; text-align: center; }
 .tip-x { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%; border: 0; background: var(--soft); color: var(--fg); cursor: pointer; }
 .hub .search { background: var(--surface); }
 .pill[data-save][aria-pressed="true"] { background: var(--straw); color: var(--straw-deep); border-color: var(--straw); }
+
+.chip.perk { background: #FBE7A1; color: #5A3D00; }
+.perk-card { background: #FBE7A1 !important; color: #3A281E !important; }
+.perk-card small { color: #5A4A2A !important; }

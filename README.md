@@ -49,6 +49,13 @@ Optional: a **Dessert** column in the FOOD tab (e.g. "Tiramisu") makes that rest
 
 The monthly closed-place check (in the sheet's script) finds every branch of each place on Google Maps and writes them to the **BRANCHES** tab. Only branches marked `open` are used. If Google matched something that isn't really a branch, type `yes` in its **Hide** column. Nothing else to maintain: new branches appear after the next monthly check.
 
+### Booking tips and perks
+
+Two optional columns in any app tab (APP, FOOD, BAR, DESSERT):
+
+- **Booking Note:** Putri's advice on getting a table, e.g. `Always full on weekends, book 3 days ahead` or `Walk in before 7pm`. Shows on the place's page as "Booking tip" (or "Getting in" if it mentions walk-ins).
+- **Perk:** anything extra for booking or ordering a certain way, e.g. `Book through OpenRice for a free tiramisu`. Shows as "Putri's perk" on the page and a 🎁 Perk badge on lists.
+
 ### Tags the app understands
 
 - Restaurants: `value`, `cheap`, `pricey`, `lunch-set`, `buffet`, `big-portion`, `small-portion`, `small-space`, `spicy`, `veggie-friendly`, `late-night`, `cute`, `group`, `healthy`

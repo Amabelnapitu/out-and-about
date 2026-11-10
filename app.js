@@ -71,7 +71,8 @@
   function isNew(x) { return x.added && Date.now() - x.added.getTime() < 31 * 864e5 && x.added.getTime() <= Date.now() + 864e5; }
   function base(o, type) {
     return { type: type, d: o.district, n: o.name, rk: num(o.rank), rt: num(o.rating), o: o.mustorder || "", p: o.price || "", pp: firstNum(o.price),
-      no: o.note || "", tags: tagsOf(o.tags), maps: o.mapslink || "", ll: coords(o.latlng), added: parseDate(o.added) };
+      no: o.note || "", tags: tagsOf(o.tags), maps: o.mapslink || "", ll: coords(o.latlng), added: parseDate(o.added),
+      bnote: o.bookingnote || o.bookingtip || "", perk: o.perk || o.perks || "" };
   }
   function keyOf(x) { return x.type + "/" + slug(x.d) + "/" + slug(x.n); }
   // Branches from the BRANCHES tab (filled in by the monthly check): every open branch of each place, by kind + name.
@@ -169,7 +170,12 @@
   function icon(x) { return x.type === "cafe" ? "☕" : x.type === "bar" ? (x.kind === "Club" ? "🪩" : "🍸") : x.type === "dessert" ? "🍰" : "🍽️"; }
   function href(x) { return "#p/" + x.key; }
   var TAGS = { "lunch-set": "🍱 Lunch set", value: "💸 Good value", cheap: "🪙 Cheap", pricey: "💎 Pricey", spicy: "🌶️ Spicy", buffet: "🍽️ Buffet", "big-portion": "🍛 Big portions", "small-portion": "🥄 Small portions", "veggie-friendly": "🥦 Veggie-friendly", "late-night": "🌙 Late night", group: "👯 Groups", healthy: "🥗 Healthy", "small-space": "🤏 Small space", cute: "🌸 Cute", "work-friendly": "💻 Work-friendly", cozy: "🛋️ Cosy", "takeaway-only": "🥡 Takeaway only", "time-limit": "⏱️ Time limit", "no-ports": "🔌 No sockets", "cash-only": "💵 Cash only", cocktails: "🍸 Cocktails", wine: "🍷 Wine", shots: "🥃 Shots", dancing: "🪩 Dancing", pretty: "✨ Pretty", crowded: "👥 Gets crowded", "best-on-weekdays": "📅 Best on weekdays", "free-shots": "🎁 Free shots" };
-  function tagChips(x) { return x.tags.length ? '<div class="chips">' + x.tags.map(function (t) { return '<span class="chip">' + esc(TAGS[t] || t) + "</span>"; }).join("") + "</div>" : ""; }
+  function tagChips(x) { return x.tags.length || x.perk ? '<div class="chips">' + (x.perk ? '<span class="chip perk">🎁 Perk</span>' : "") + x.tags.map(function (t) { return '<span class="chip">' + esc(TAGS[t] || t) + "</span>"; }).join("") + "</div>" : ""; }
+  // Putri's own advice on getting a table, and any perk for booking a certain way (Booking Note and Perk columns).
+  function tipCards(x) {
+    return (x.perk ? '<div class="banner perk-card"><span aria-hidden="true" style="font-size:24px">🎁</span><span><b>Putri’s perk</b><small>' + esc(x.perk) + "</small></span></div>" : "") +
+      (x.bnote ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">📅</span><span><b>' + (/walk[\s-]?in/i.test(x.bnote) ? "Getting in" : "Booking tip") + "</b><small>" + esc(x.bnote) + "</small></span></div>" : "");
+  }
 
   // Something sweet after a meal: Putri's dessert list if there is one, otherwise cafés known for cake and dessert places.
   // Desserts Putri has rated (plus dessert restaurants); before there was a dessert list, cafés known for cake filled in.
@@ -893,7 +899,7 @@
       '<div class="stats4"><div class="stat"><b>' + (x.rt != null ? "★ " + x.rt : "–") + '</b><small>Putri’s rating' + (branchesOf(x).length ? " · " + (branchesOf(x).length + 1) + " branches" : "") + '</small></div><div class="stat"><b>' + esc(price(x) || "–") + "</b><small>" + (x.type === "food" ? "per person" : x.type === "bar" ? "per drink" : "price") + "</small></div></div></div>" +
       (x.o ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">' + (x.type === "food" ? "🥢" : x.type === "bar" ? "🍸" : x.type === "dessert" ? "🍰" : "☕") + "</span><span><b>" + (x.type === "food" ? "Order this" : x.type === "bar" ? "Drink this" : "Get this") + "</b><small>" + esc(x.o) + "</small></span></div>" : "") +
       (x.dessert ? '<div class="banner"><span aria-hidden="true" style="font-size:24px">🍰</span><span><b>Stay for dessert</b><small>' + esc(x.dessert) + "</small></span></div>" : "") +
-      (x.no ? '<p class="note" style="font-size:16px">“' + esc(x.no) + "”</p>" : "") + tagChips(x) +
+      (x.no ? '<p class="note" style="font-size:16px">“' + esc(x.no) + "”</p>" : "") + tagChips(x) + tipCards(x) +
       '<div class="chips">' + addBtn(x) + saveBtn(x) + '<a class="pill" href="' + esc(mapsUrl(x)) + '" target="_blank" rel="noopener">📍 Maps</a><button class="pill" data-share="1">Share</button></div>' +
       voteBlock(x) + branchHtml +
       sections.filter(function (s) { return s[1].length; }).map(function (s) { return '<span class="label">' + s[0] + "</span>" + pairList(s[1]); }).join("") +
