@@ -336,3 +336,9 @@ a.row, a.pill, a.banner, a.mod, a.mini, a.hot { text-decoration: none; }
 .trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
 .dessert-line { font-size: 13.5px; margin: 0; }
 .dessert-line a { color: inherit; font-weight: 700; }
+
+/* ---------- Back ---------- */
+.top-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.top-back { width: 36px; height: 36px; flex: none; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font-size: 18px; line-height: 1; cursor: pointer; }
+.land-back { position: absolute; z-index: 5; top: max(12px, env(safe-area-inset-top, 0px)); left: max(14px, env(safe-area-inset-left, 0px)); padding: 7px 14px; border-radius: 999px; background: var(--surface); color: var(--fg); border: 1px solid var(--line); font-weight: 700; font-size: 14px; text-decoration: none; box-shadow: var(--shadow); }
+a.cta, a.back { text-decoration: none; text-align: center; }

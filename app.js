@@ -804,7 +804,7 @@
         return '<li' + (i >= 6 ? ' class="more-branch" hidden' : "") + ">" + (o.twin ? '<a class="row" href="' + href(o.twin) + '">' : '<a class="row" href="' + esc(branchUrl(o.b)) + '" target="_blank" rel="noopener">') + inner + "</a></li>";
       }).join("") + "</ul>" + (others.length > 6 ? '<button class="small-link" data-morebranches="1">Show all ' + others.length + " branches</button>" : "") : "";
     var word = { cafe: "café", food: "restaurant", bar: x.kind === "Club" ? "club" : "bar", dessert: "dessert spot" }[x.type];
-    return '<div class="pad"><button class="back" data-back="1">← Back</button>' +
+    return '<div class="pad">' +
       '<div class="card">' + (x.rk && x.rk <= 3 ? '<span class="label" style="margin:0">Putri’s #' + x.rk + " in " + esc(x.d) + "</span>" : "") +
       '<h1 class="app-title">' + esc(x.n) + '</h1><p class="sub">' + esc(x.d) + (x.type !== "cafe" && x.c ? " · " + esc(x.c) : "") + (x.area ? " · " + esc(x.area) : "") + "</p>" +
       '<div class="stats4"><div class="stat"><b>' + (x.rt != null ? "★ " + x.rt : "–") + '</b><small>Putri’s rating' + (branchesOf(x).length ? " · " + (branchesOf(x).length + 1) + " branches" : "") + '</small></div><div class="stat"><b>' + esc(price(x) || "–") + "</b><small>" + (x.type === "food" ? "per person" : x.type === "bar" ? "per drink" : "price") + "</small></div></div></div>" +
@@ -909,6 +909,19 @@
     var mod = MODULE_OF[h || "home"] || h.split("/")[0];
     return { name: h || "home", module: mod, path: h };
   }
+  // Back: the previous screen if you got here inside the app, otherwise the screen above this one
+  // (so a shared link or the installed app, which has no browser back button, still has somewhere to go).
+  var trail = [location.hash || "#"], replacing = false;
+  function parentHash() {
+    var r = current();
+    if (r.name === "place") return "#" + ({ bean: "bean/map", food: "food/map", bar: "bar/hotspots" }[r.module] || "");
+    if (r.path && r.path.indexOf("/") !== -1) return "#" + r.path.split("/")[0];
+    return "#";
+  }
+  function goBack() {
+    if (trail.length > 1) { history.back(); return; }
+    var up = parentHash(); replacing = true; trail = [up]; location.replace(up);
+  }
   var lastKey = "";
   function render(keep) {
     var r = current(), y = window.scrollY, html;
@@ -925,6 +938,7 @@
     var theme = r.name === "myday" ? "hub" : THEME[r.module] || "hub";
     document.body.className = "theme-" + theme;
     app.innerHTML = html;
+    if (["bean", "food", "bar", "sip"].indexOf(r.name) !== -1) app.insertAdjacentHTML("afterbegin", '<a class="land-back" href="#">← Home</a>');
     var bare = ["bean", "food", "bar", "sip", "food/quiz", "bar/quiz", "sip/plans"].indexOf(r.name) !== -1;
     topbar.hidden = r.name === "home" || bare;
     navEl.hidden = bare;
@@ -939,6 +953,11 @@
     window.scrollTo(0, keep ? y : 0);
   }
   window.addEventListener("hashchange", function () { clearTimers(); S.cooking = null; render(); });
+  window.addEventListener("hashchange", function () {
+    var h = location.hash || "#";
+    if (replacing) { replacing = false; return; }
+    if (trail.length > 1 && trail[trail.length - 2] === h) trail.pop(); else trail.push(h);
+  });
 
   function finishQuiz() {
     var st = S.quiz, kind = st.kind;
@@ -966,7 +985,7 @@
     if (a) { S.quiz = null; return; }
     var t = e.target.closest("button"); if (!t) return;
     var d = t.dataset;
-    if (d.back) { if (history.length > 1) history.back(); else location.hash = "#"; return; }
+    if (d.back) { goBack(); return; }
     if (d.qback) { if (S.quiz && S.quiz.step) { S.quiz.step--; render(); } else { S.quiz = null; location.hash = "#" + (current().module === "sip" ? "sip" : current().module); } return; }
     if (d.answer) {
       if (t.classList.contains("picked") || !S.quiz) return; t.classList.add("picked");
@@ -1058,6 +1077,7 @@
     if (e.target.id === "mq") { S.mq = e.target.value; keepFocus("mq"); }
   });
   document.addEventListener("change", function (e) { if (e.target.id === "budget" || e.target.id === "barbudget") render(true); });
+  document.getElementById("back-btn").addEventListener("click", goBack);
   document.getElementById("share-btn").addEventListener("click", function () { shareLink(document.title, "Putri’s honest picks around Hong Kong: cafés, restaurants, bars and more.", location.href); });
   setInterval(function () {
     var r = current(), st = { food: S.food, bar: S.bar, sip: S.day }[r.name];
