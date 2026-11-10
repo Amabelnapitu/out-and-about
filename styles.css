@@ -353,3 +353,5 @@ a.cta, a.back { text-decoration: none; text-align: center; }
 .chip.perk { background: #FBE7A1; color: #5A3D00; }
 .perk-card { background: #FBE7A1 !important; color: #3A281E !important; }
 .perk-card small { color: #5A4A2A !important; }
+
+.sync-card small { display: block; }

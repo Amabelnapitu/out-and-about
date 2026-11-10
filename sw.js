@@ -1,5 +1,5 @@
 // Out & About offline support: keeps the app and the latest lists on the phone.
-var CACHE = "out-and-about-v6";
+var CACHE = "out-and-about-v7";
 var SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "data/cafes.csv", "data/food.csv", "data/bars.csv", "data/branches.csv", "data/desserts.csv", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", function (e) {
@@ -40,6 +40,7 @@ self.addEventListener("fetch", function (e) {
   var req = e.request;
   if (req.method !== "GET") return;
   var url = new URL(req.url);
+  if (/firebase|googleapis\.com$|gstatic\.com$/.test(url.hostname) && url.hostname !== "fonts.googleapis.com" && url.hostname !== "fonts.gstatic.com") return; // sign-in and sync always use the network
   if (url.hostname === "script.google.com" || url.hostname.endsWith("googleusercontent.com")) return; // votes and notes need the network
   if (url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com") { e.respondWith(cacheFirst(req)); return; }
   if (url.hostname === "docs.google.com") { e.respondWith(networkFirst(req, url.href)); return; } // the published lists

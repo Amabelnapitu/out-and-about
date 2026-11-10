@@ -68,6 +68,28 @@ They use the same Apps Script web app as Bean There (`apiUrl` in `config.js`). V
 
 After changing `Code.gs`, deploy a new version so the site uses it: **Deploy → Manage deployments → ✏️ → Version: New version → Deploy** (the URL stays the same).
 
+## Sign-in and sync (optional)
+
+Without it, saved places, My day, quiz results and votes stay on each phone. With it, people can tap **Sign in with Google** on the Saved page and those follow them to any device. It uses Firebase (free plan):
+
+1. In the Firebase console, create a project, enable **Authentication → Google**, and create a **Firestore Database** (production mode).
+2. Add `amabelnapitu.github.io` under **Authentication → Settings → Authorized domains**.
+3. Register a Web app and paste its `firebaseConfig` into `config.js` as `firebase: { … }`.
+4. In **Firestore → Rules**, publish:
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
+```
+
+Each person has one document, `users/<their id>`, that only they can read or write. For every item the newest change wins; the first time a device signs in, saved places from both sides are combined. Signing out leaves everything on the phone.
+
 ## Hosting
 
 GitHub Pages: **Settings → Pages → Deploy from a branch → `main` / `(root)`**. The site is then at https://amabelnapitu.github.io/out-and-about/

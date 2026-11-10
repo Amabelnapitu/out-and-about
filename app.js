@@ -11,7 +11,10 @@
 
   // ---------- Storage (all on this phone; no login) ----------
   function load(key, fallback) { try { var v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch (e) { return fallback; } }
-  function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
+  function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} if (SYNC_KEYS.indexOf(key) !== -1) touched(key); }
+  // What follows you between devices when you sign in (see "Sync" below).
+  var SYNC_KEYS = ["oa-saved", "oa-myday", "oa-food-profile", "oa-bar-profile", "oa-bean-profile", "oa-day-profile", "oa-myvotes", "oa-bookings", "oa-plan", "oa-daydate"];
+  var syncTs = load("oa-sync-ts", {}), touched = function (key) { syncTs[key] = Date.now(); try { localStorage.setItem("oa-sync-ts", JSON.stringify(syncTs)); } catch (e) {} if (window.__oaPush) window.__oaPush(); };
   var device = load("oa-device", null);
   if (!device) { device = "d" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); save("oa-device", device); }
 
@@ -599,7 +602,8 @@
       '<a class="mini" href="#saved"><b>♡ Saved</b><small>' + plural(S.saved.filter(find).length, "place") + '</small></a><a class="mini" href="#sweet"><b>🍰 Sweet tooth</b><small>' + plural(DESSERTS.length, "dessert spot") + "</small></a></div>" +
       (fresh.length ? '<span class="label">🆕 New this month</span><div class="chips">' + fresh.slice(0, 8).map(function (x) { return '<a class="pill" href="' + href(x) + '">' + icon(x) + " " + esc(x.n) + "</a>"; }).join("") + "</div>" : "") +
       '<a class="banner" href="#putri"><span aria-hidden="true" style="font-size:24px">🌷</span><span><b>Putri’s page</b><small>' + plural(ALL.length, "place") + " tried across " + districtsOf(ALL).length + " districts</small></span></a>" +
-      '<a class="banner" href="#note"><span aria-hidden="true" style="font-size:24px">💌</span><span><b>Send Putri a note</b><small>Suggest a place, report one that’s closed, or say hi</small></span></a>' + installTip();
+      '<a class="banner" href="#note"><span aria-hidden="true" style="font-size:24px">💌</span><span><b>Send Putri a note</b><small>Suggest a place, report one that’s closed, or say hi</small></span></a>' +
+      (SYNC.on && !SYNC.user ? '<a class="banner" href="#saved"><span aria-hidden="true" style="font-size:24px">☁️</span><span><b>Sign in to sync</b><small>Keep your places on all your devices</small></span></a>' : "") + installTip();
   }
 
   // Bean There lives on as its own site; here you get its map and café pages, plus links to the rest.
@@ -977,7 +981,8 @@
       (list.length ? '<ul class="list">' + list.map(function (x) { return '<li><a class="row" href="' + href(x) + '"><span class="n">' + icon(x) + "</span><span><b>" + esc(x.n) + "</b><small>" + esc(x.d + (x.o ? " · " + x.o : "")) + '</small></span><span class="score">' + (x.rt != null ? "★ " + x.rt : "") + "</span></a></li>"; }).join("") + "</ul>" +
         '<div class="chips"><button class="pill solid" data-addall="' + esc(list.slice(0, 8).map(function (x) { return x.key; }).join(",")) + '">＋ Add to My day</button></div>'
         : '<div class="empty">Nothing saved yet. Tap <b>♡ Save</b> on any place.</div>') +
-      '<span class="label">Your stuff on another phone</span><p class="sub" style="margin-top:-6px">Your saved places, My day and quiz results live on this phone. To move or back them up, send yourself this link and open it on the other device.</p>' +
+      syncCard() +
+      '<span class="label">' + (SYNC.on ? "Or move it once, without signing in" : "Your stuff on another phone") + '</span><p class="sub" style="margin-top:-6px">' + (SYNC.on ? "Send yourself this link and open it on the other device." : "Your saved places, My day and quiz results live on this phone. To move or back them up, send yourself this link and open it on the other device.") + "</p>" +
       '<div class="chips"><button class="pill" data-restorelink="1">📲 Get my link</button></div></div>';
   };
   V.sweet = function () {
@@ -1068,6 +1073,89 @@
       save("oa-saved", S.saved);
     } catch (e) { msg = "That link didn’t work. Ask for a new one."; }
     location.replace("#saved"); setTimeout(function () { toast(msg); }, 150);
+  }
+  // ---------- Sync (optional sign-in with Google, through Firebase) ----------
+  // Each person has one document, users/<their id>, holding their saved places, My day, quiz results and votes.
+  // For every item the newest change wins; the first time a device signs in, saved places from both sides are combined.
+  var SYNC = { on: !!(CFG.firebase && CFG.firebase.apiKey), user: null, busy: false, db: null, ref: null, timer: null, ready: false };
+  function loadScript(src) { return new Promise(function (ok, bad) { var s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = bad; document.head.appendChild(s); }); }
+  function fb() {
+    if (window.firebase && window.firebase.auth) return Promise.resolve(window.firebase);
+    var v = "https://www.gstatic.com/firebasejs/10.12.2/firebase-";
+    return loadScript(v + "app-compat.js").then(function () { return Promise.all([loadScript(v + "auth-compat.js"), loadScript(v + "firestore-compat.js")]); }).then(function () { return window.firebase; });
+  }
+  function applyLocal(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+    if (key === "oa-saved") S.saved = value || [];
+    if (key === "oa-myday") S.myday = (value || []).filter(function (k) { return BYKEY[k]; });
+    if (key === "oa-food-profile") S.food.profile = value;
+    if (key === "oa-bar-profile") S.bar.profile = value;
+    if (key === "oa-bean-profile") S.bean.profile = value;
+    if (key === "oa-day-profile") S.day.profile = value;
+    if (key === "oa-myvotes") S.myVotes = value || {};
+    if (key === "oa-bookings" && "bookings" in S) S.bookings = value || [];
+    if (key === "oa-plan" && "plan" in S) S.plan = value || {};
+    if (key === "oa-daydate" && "dayDate" in S && value) S.dayDate = value;
+  }
+  function isEmpty(v) { return v == null || (Array.isArray(v) && !v.length) || (typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length); }
+  // Bring a copy from the cloud together with what's on this phone. Returns true if this phone has something newer to send.
+  function mergeRemote(remote) {
+    var data = (remote && remote.data) || {}, ts = (remote && remote.ts) || {}, pushBack = false, changed = false;
+    SYNC_KEYS.forEach(function (key) {
+      var local = load(key, null), lt = syncTs[key] || 0, rt = ts[key] || 0, has = key in data;
+      if (!has) { if (!isEmpty(local)) { if (!lt) syncTs[key] = Date.now(); pushBack = true; } return; }
+      if (key === "oa-saved" && !lt && !isEmpty(local)) { // first sign-in on this phone: keep both lists
+        var both = (data[key] || []).slice(); local.forEach(function (k) { if (both.indexOf(k) === -1) both.push(k); });
+        applyLocal(key, both); syncTs[key] = Date.now(); pushBack = true; changed = true; return;
+      }
+      if (rt > lt || (!lt && isEmpty(local))) { if (JSON.stringify(local) !== JSON.stringify(data[key])) { applyLocal(key, data[key]); changed = true; } syncTs[key] = rt; }
+      else if (lt > rt) pushBack = true;
+    });
+    try { localStorage.setItem("oa-sync-ts", JSON.stringify(syncTs)); } catch (e) {}
+    if (changed) render(true);
+    return pushBack;
+  }
+  function pushNow() {
+    if (!SYNC.ref || !SYNC.ready) return;
+    var data = {}, ts = {};
+    SYNC_KEYS.forEach(function (key) { var v = load(key, null); if (v != null && syncTs[key]) { data[key] = v; ts[key] = syncTs[key]; } });
+    SYNC.ref.set({ data: data, ts: ts, updated: Date.now() }).catch(function (e) { console.warn("Sync failed", e); });
+  }
+  window.__oaPush = function () { if (!SYNC.user) return; clearTimeout(SYNC.timer); SYNC.timer = setTimeout(pushNow, 1200); };
+  function startSync() {
+    if (!SYNC.on) return;
+    fb().then(function (firebase) {
+      if (!firebase.apps.length) firebase.initializeApp(CFG.firebase);
+      SYNC.db = firebase.firestore();
+      firebase.auth().onAuthStateChanged(function (user) {
+        if (SYNC.stop) { SYNC.stop(); SYNC.stop = null; }
+        SYNC.user = user; SYNC.ready = false; SYNC.ref = user ? SYNC.db.collection("users").doc(user.uid) : null;
+        if (user) SYNC.stop = SYNC.ref.onSnapshot(function (snap) {
+          if (snap.metadata && snap.metadata.hasPendingWrites) return;
+          var again = mergeRemote(snap.exists ? snap.data() : null); SYNC.ready = true;
+          if (again) window.__oaPush();
+        }, function (e) { console.warn("Sync stopped", e); });
+        if (["saved", "home"].indexOf(current().name) !== -1) render(true);
+      });
+    }).catch(function (e) { console.warn("Couldn’t start sync", e); });
+  }
+  function signIn() {
+    SYNC.busy = true; render(true);
+    fb().then(function (firebase) {
+      var provider = new firebase.auth.GoogleAuthProvider();
+      return firebase.auth().signInWithPopup(provider).catch(function (e) {
+        if (e && /popup-blocked|operation-not-supported/.test(e.code || "")) return firebase.auth().signInWithRedirect(provider);
+        throw e;
+      });
+    }).then(function () { toast("Signed in. Your places now sync ✓"); })
+      .catch(function (e) { if (!e || !/popup-closed|cancelled/.test(e.code || "")) toast("Couldn’t sign in. Please try again."); })
+      .then(function () { SYNC.busy = false; render(true); });
+  }
+  function signOut() { fb().then(function (firebase) { return firebase.auth().signOut(); }).then(function () { toast("Signed out. Your places stay on this phone."); }); }
+  function syncCard() {
+    if (!SYNC.on) return "";
+    if (SYNC.user) return '<div class="card sync-card"><b>☁️ Syncing as ' + esc(SYNC.user.displayName || SYNC.user.email || "you") + '</b><small class="meta">Saved places, My day, quiz results and votes follow you to any device you sign in on.</small><button class="small-link" data-signout="1">Sign out</button></div>';
+    return '<div class="card sync-card"><b>☁️ Use Out &amp; About on all your devices</b><small class="meta">Sign in once and your saved places, My day, quiz results and votes follow you. Optional: everything works without it.</small><button class="pill solid" data-signin="1" style="justify-self:start"' + (SYNC.busy ? " disabled" : "") + ">" + (SYNC.busy ? "Signing in…" : "Sign in with Google") + "</button></div>";
   }
   var lastKey = "";
   function render(keep) {
@@ -1182,6 +1270,8 @@
       return;
     }
     if (d.save) { var si = S.saved.indexOf(d.save); if (si === -1) { S.saved.push(d.save); toast("Saved ♥"); } else { S.saved.splice(si, 1); toast("Removed from Saved"); } save("oa-saved", S.saved); render(true); return; }
+    if (d.signin) { signIn(); return; }
+    if (d.signout) { signOut(); return; }
     if (d.dismiss) { save(d.dismiss, true); render(true); return; }
     if (d.restorelink) { shareLink("My Out & About", "My Out & About places:", restoreLink()); return; }
     if (d.useplan) { if (S.myday.length && !confirm("Replace your current My day with this plan?")) return; S.myday = (S.shared || []).filter(function (k) { return BYKEY[k]; }).slice(0, 8); saveDay(); location.hash = "#myday"; return; }
@@ -1253,6 +1343,7 @@
     if (S.myday.length !== before) { saveDay(); setTimeout(function () { toast("A place in My day has closed, so it was removed."); }, 400); }
     render();
     refreshVotes();
+    startSync();
     if (!navigator.onLine) toast("You’re offline. Showing the lists saved on this phone.");
   }).catch(function (err) {
     console.error(err);
